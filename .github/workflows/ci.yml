@@ -18,5 +18,8 @@ jobs:
   ci:
     uses: shouni/workflows/.github/workflows/go-ci.yml@v1
     with:
-      # テストコードを持たないため、カバレッジ計測とファズ実行は無効。
-      coverage: false
+      coverage: true
+      # CleanJSONResponse は全ての構造化出力が通る一本道で、手で並べたケースでは
+      # 文字列リテラルの走査と括弧の切り出しが絡む場所を網羅しきれない。
+      fuzz-targets: ./gemini#FuzzCleanJSONResponse
+      fuzz-time: 60s

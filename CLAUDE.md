@@ -10,15 +10,19 @@ Go library wrapping the official `google.golang.org/genai` SDK for **Vertex AI**
 
 **Vertex AI only.** The Gemini API (API key) backend was removed — `Config` takes `ProjectID`+`LocationID`, auth is ADC, and there is no backend branching left anywhere. Don't reintroduce a backend flag: the point is that no call site has to ask which backend it is on. `SafetyOff` is deliberately not re-exported because Vertex AI rejects it.
 
-**This module carries no tests.** Every `_test.go` was deleted at the owner's request, and CI runs build, vet, gofmt and lint only (`coverage: false`, no fuzz targets). The invariants noted below used to be pinned by tests and now are not — nothing catches a regression in them automatically, so verify them by reading when you touch the code.
+**Tests were reintroduced from `go-gemini-client`, this module's predecessor.** Every package has them, CI measures coverage, and `FuzzCleanJSONResponse` runs for 60s per build. The invariants noted below are pinned by tests again — when one of them is wrong, expect a red test rather than a silent regression. Conventions are in the Tests section.
 
 ## Commands
 
 ```sh
 go build ./...
 go vet ./...
+go test ./...
+go test -race ./...                          # singleflight と synctest まわりに効く
 test -z "$(gofmt -l .)"                      # CI fails on unformatted code
 golangci-lint run                            # config in .golangci.yml
+
+go test ./gemini -run '^$' -fuzz FuzzCleanJSONResponse -fuzztime 60s
 ```
 
 Note: a locally installed golangci-lint v2.13.1 panics on the `veo` package (staticcheck SA4023 crash, unrelated to this code). Lint the other packages explicitly if you hit it:
@@ -105,6 +109,17 @@ It has one caller since the File API was removed. It stays `internal` because a 
 - **`WithExecTimeout` has no "unlimited".** The shared run is detached from every caller, so this is the only thing that can stop it; unlimited means one hung call holds a goroutine and blocks the same key forever.
 - A nil `*Guard` is valid and means "no rate interval, default exec timeout", so callers can pass one through without branching.
 - Typed decorators do not belong here — what to wrap is the caller's business, and putting them here grows one method per downstream interface.
+
+## Tests
+
+Ported from `go-gemini-client` (this module's predecessor) and adapted to the Vertex-only surface; `imagegen` is net-new because that repo has no equivalent package.
+
+- **Test doubles are hand-written — never generated, never `testify/mock`.** Every injection point here is one or two methods (`gemini.Generator`, `gemini.VideoGenerator`, the internal `modelClient` / `videoClient`, lyria's prompt builders), so a plain struct that records its calls is shorter than the mock setup and is checked by the compiler. `testify/mock` matches method names as strings, which is how the predecessor's `GenerateWithAttachments` → `Generate` rename left tests that still built and failed at run time. Each fake lives next to the seam it stands in for: `gemini/genai_test.go`, `veo/veo_test.go`, `lyria/lyria_test.go`, `imagegen/imagegen_test.go`.
+- **The assertion style splits by layer.** `gemini`, `veo`, `internal/poll` and `music` use plain `testing` with table-driven subtests. `callguard`, `lyria` and `imagegen` use testify — `require` by default, `assert` only where the test can keep going after a failure. Don't write `assert.NoError` and then dereference the result; that turns a readable failure into a nil panic further down.
+- **`testing/synctest` covers everything time-dependent** — rate intervals, exec timeouts, poll intervals, deadlines. Inside a bubble the clock is virtual, so elapsed time equals the configured value exactly and assertions compare with `==` rather than a tolerance. `synctest.Wait()` is also how the singleflight tests know every caller has joined the in-flight call, with no polling and no sleeps.
+- **One test file per source file**, matching the source-naming rule. There is no shared `helpers_test.go`; the fuzz target sits in `gemini/jsonclean_test.go` beside the function it fuzzes.
+- Tests needing real ADC (`gemini.New` on the success path, `toClientConfig` attaching credentials to a supplied `HTTPClient`) go through `skipWithoutGCPCredentials` and skip on CI. Everything else runs with no network and no GCP.
+- `go test -race` is worth running: `callguard` and `lyria` are the concurrency surface, and the shared prompt stubs carry a mutex for exactly that reason.
 
 ## Conventions
 
