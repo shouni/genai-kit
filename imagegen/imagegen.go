@@ -32,6 +32,12 @@ type Generator interface {
 var _ Generator = (*Client)(nil)
 
 // Client は画像生成の実装です。
+//
+// 発射間隔・1 回あたりの上限時間・重複排除は持ちません。クォータはプロジェクト単位で
+// 操作の種類ごとではないため、ライブラリごとに独立したレート制限を持たせると合計が
+// クォータを超えます。ガードが要る場合は Client（Generator）を callguard で
+// デコレートし、テキスト生成と 1 つの Guard を共有する形でワークフロー層に置いて
+// ください。
 type Client struct {
 	ai       gemini.Generator
 	autoSeed bool

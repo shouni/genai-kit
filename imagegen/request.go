@@ -20,15 +20,25 @@ import (
 // 設定できます。フィールドを写し取ると gemini 側の追加のたびに 2 か所の同期が
 // 必要になるため、埋め込みにしています。
 //
-// SafetySettings と PersonGeneration は未指定の場合のみ既定値が補われます
-// （補完の内容と理由は applyDefaults を参照）。明示した値は上書きされません。
+// 昇格したフィールドのうち SafetySettings と PersonGeneration は、未指定の場合のみ
+// 次の既定値が補われます。
+//
+//	SafetySettings   → gemini.NewSafetySettings(gemini.SafetyBlockNone)
+//	PersonGeneration → gemini.PersonGenerationAllowAll
+//
+// 安全フィルタは Vertex AI が OFF を受け付けないため BLOCK_NONE、人物生成は
+// キャラクター生成が主用途のため許可が既定です。明示した値は上書きしません。
+// 無条件に上書きすると、利用側が安全フィルタを厳しくする手段が無くなるためです。
 type Request struct {
 	// Model は生成に使うモデル名です。必須。
 	Model string
 	// Prompt は生成指示です。NegativePrompt と合わせて空の場合はエラーです。
 	Prompt string
 	// NegativePrompt は生成に含めたくない要素です。API のフィールドではなく、
-	// Prompt へ既定の区切りで連結して送られます（negativePromptSeparator を参照）。
+	// 区切り "\n\n[Negative Prompt]\n" を挟んで Prompt へ連結して送られます。
+	// この見た目は互換性の契約です。下流のプロンプト実装がこの描画に依存しているため、
+	// 区切りの文字列は変わりません。
+	// Prompt と NegativePrompt の両方が（空白を除いて）空ならエラーです。
 	NegativePrompt string
 	// Images は参照画像の gs:// URI です。並び順はモデルの解釈に影響するため
 	// 保持されます。空文字列の要素はエラーではなく、送信対象から黙って外れます
