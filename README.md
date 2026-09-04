@@ -155,14 +155,12 @@ Cloud Run などの環境では API キーをアプリケーションに持た�
 それらが要る構成では [gemini-image-kit](https://github.com/shouni/gemini-image-kit) を
 使ってください。
 
-未指定時に補われる既定値は次の 2 つです（明示した値は上書きしません。上書きすると、利用側が
-安全フィルタを厳しくする手段が無くなるためです）。
+**安全フィルタと人物生成には既定値が補われます**（明示した値は上書きしません。上書きすると、
+利用側が安全フィルタを厳しくする手段が無くなるためです）。補われる値は `imagegen.Request` の
+godoc にあります。
 
-- `SafetySettings` → `NewSafetySettings(SafetyBlockNone)`
-- `PersonGeneration` → `PersonGenerationAllowAll`（キャラクター生成が主用途のため）
-
-`NegativePrompt` は API のフィールドではなく、`"\n\n[Negative Prompt]\n"` を区切りとして
-`Prompt` へ連結して送ります。**この見た目は下流のプロンプト実装が依存している互換性の契約です。**
+**`NegativePrompt` の区切りは互換性の契約です。** API のフィールドではなく決まった見た目で
+`Prompt` へ連結して送るため、下流のプロンプト実装がその描画に依存しています。
 
 **`imagegen` は発射間隔も重複排除も持ちません。** クォータはプロジェクト単位なので、
 `imagegen.Generator` を `callguard` でデコレートし、テキスト生成と 1 つの `Guard` を共有する形で
