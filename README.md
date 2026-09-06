@@ -8,16 +8,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Reference](https://pkg.go.dev/badge/github.com/shouni/genai-kit.svg)](https://pkg.go.dev/github.com/shouni/genai-kit)
 
-## 🚀 概要 (About) - genai SDK を公開 API に出さない Vertex AI 専用クライアント。保存も認証情報の配布も引き受けません
+## 🚀 概要 (About) - genai SDK を公開 API に出さない Vertex AI 向けクライアント。保存も認証情報の配布も引き受けません
 
 **Gen Ai Kit** は、**Google Cloud Vertex AI** 向けの Go ライブラリです。テキスト生成、`gs://` を使った
 マルチモーダル入力、参照画像付きの画像生成、Lyria による音楽生成、Veo による動画生成を扱います。
 生成物の保存先は決めず、認証は Application Default Credentials に委ねます。
 
 姉妹ライブラリの [go-gemini-client](https://github.com/shouni/go-gemini-client) との違いは 3 つです。
-**バックエンドは Vertex AI のみ**（API キー方式はありません）、**参照画像は `gs://` をモデル側に
-直接解決させる**（取得もアップロードも起きません）、**画像生成の `imagegen` を内蔵**しています。
-詳しくは[使い分け](#-go-gemini-client-との使い分け)にあります。
+**バックエンドは Vertex AI が既定**（`Config.APIKey` は暫定の例外で、後述）、**参照画像は `gs://` を
+モデル側に直接解決させる**（取得もアップロードも起きません）、**画像生成の `imagegen` を内蔵**して
+います。詳しくは[使い分け](#-go-gemini-client-との使い分け)にあります。
 
 シグネチャ・フィールド・エラーの一覧は
 [pkg.go.dev](https://pkg.go.dev/github.com/shouni/genai-kit) にあります。ここに書くのは、
@@ -151,14 +151,19 @@ File API 経由も無いこと（`imagegen` パッケージ）、`NegativePrompt
 
 | | [go-gemini-client](https://github.com/shouni/go-gemini-client) | genai-kit |
 | --- | --- | --- |
-| バックエンド | Gemini API（API キー）と Vertex AI | **Vertex AI のみ** |
+| バックエンド | Gemini API（API キー）と Vertex AI | **Vertex AI が既定**（API キーは暫定サポート） |
 | 参照画像 | File API へ上げてキャッシュする経路を持つ | **`gs://` をモデル側に解決させる**（転送が起きない） |
 | 画像生成 | [gemini-image-kit](https://github.com/shouni/gemini-image-kit) へ委譲 | `imagegen` を内蔵 |
 
-API キーを配る必要が無く、参照画像が GCS にあるなら genai-kit です。バックエンドを実行時に
-選びたい、あるいは Gemini API の File API に上げた素材を使いたいなら go-gemini-client です。
-参照画像を HTTP から取得したり再圧縮したりする必要があるなら、どちらでもなく
-gemini-image-kit が担当します。
+API キーを配る必要が無く、参照画像が GCS にあるなら genai-kit です。Gemini API の File API に
+上げた素材を使いたいなら go-gemini-client です。参照画像を HTTP から取得したり再圧縮したり
+する必要があるなら、どちらでもなく gemini-image-kit が担当します。
+
+**`Config.APIKey` は暫定サポートです。** 指定すると Gemini API バックエンドへ切り替わりますが、
+これは最新の Lyria が Vertex AI で提供されておらず、音楽生成だけが API キー経路でしか動かない
+ための例外です。Vertex AI で使えるようになった時点で削除します。**新しい用途でこれを選ばないで
+ください** — 呼び出し側がどちらのバックエンドかを意識せずに済むことが、このライブラリの
+設計上の狙いだからです。
 
 ---
 
