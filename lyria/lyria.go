@@ -72,11 +72,17 @@ func New(aiClient gemini.Generator, textPrompts TextPromptBuilder, audioPrompts 
 		guard:        textGuard,
 	}
 
+	// 音声だけ別のクライアントへ逃がせる（WithAudioGenerator を参照）。
+	audioClient := opts.audioGenerator
+	if audioClient == nil {
+		audioClient = aiClient
+	}
+
 	return &Workflow{
 		lyrics:   textGen,
 		composer: textGen,
 		audio: &audioGenerator{
-			aiClient:          aiClient,
+			aiClient:          audioClient,
 			prompts:           audioPrompts,
 			guard:             audioGuard,
 			defaultLyriaModel: opts.lyriaModel,

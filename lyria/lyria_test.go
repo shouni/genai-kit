@@ -253,6 +253,49 @@ func TestWorkflowDelegatesToEachRole(t *testing.T) {
 	})
 }
 
+// TestNewRoutesAudioToAudioGenerator は、WithAudioGenerator を渡すと音声生成だけがそちらへ
+// 行き、作詞・作曲は従来どおり aiClient へ行くことを検証します。
+//
+// 音声を REST 直叩きの実装へ逃がしている間、テキスト側まで巻き込まないための切り分けです。
+// 未指定なら両方とも aiClient に戻る（差し替えを外すだけで元に戻る）ことも同時に見ます。
+func TestNewRoutesAudioToAudioGenerator(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("指定すれば音声だけがそちらへ行くこと", func(t *testing.T) {
+		text := textResponder(validLyricsJSON)
+		audioAI := audioResponder([]byte{1, 2, 3})
+		w := newTestWorkflow(t, text, &stubTextPrompts{lyricsPrompt: "p"}, &stubAudioPrompts{fullSong: "full"},
+			WithAudioGenerator(audioAI))
+
+		_, err := w.GenerateLyrics(ctx, AIModels{}, &CollectedContent{Prompt: "x"})
+		require.NoError(t, err)
+		track, err := w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, text.callCount(), "作詞は aiClient へ")
+		assert.Equal(t, 1, audioAI.callCount(), "音声は WithAudioGenerator へ")
+		assert.Equal(t, "lyria-3", audioAI.lastCall(t).Model)
+		assert.Equal(t, []byte{1, 2, 3}, track.Audio)
+	})
+
+	t.Run("未指定なら両方とも aiClient へ行くこと", func(t *testing.T) {
+		ai := &fakeGenerator{respond: func(call generateCall) (*gemini.Response, error) {
+			if call.Model == "lyria-3" {
+				return audioResponse("audio/mpeg", []byte{1}, ""), nil
+			}
+			return &gemini.Response{Text: validLyricsJSON}, nil
+		}}
+		w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "p"}, &stubAudioPrompts{fullSong: "full"})
+
+		_, err := w.GenerateLyrics(ctx, AIModels{}, &CollectedContent{Prompt: "x"})
+		require.NoError(t, err)
+		_, err = w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
+		require.NoError(t, err)
+
+		assert.Equal(t, 2, ai.callCount())
+	})
+}
+
 // TestTextAndAudioHaveSeparateRateGuards は、テキストと音声の発射間隔が独立して
 // いることを検証します。別のモデルの別のクォータなので、片方の混雑でもう片方を
 // 絞る理由がありません。共有していると、待たされない側まで待たされます。

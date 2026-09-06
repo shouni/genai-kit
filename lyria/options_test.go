@@ -13,14 +13,18 @@ func TestApplyOptions(t *testing.T) {
 	t.Parallel()
 
 	t.Run("指定した値が反映されること", func(t *testing.T) {
+		audio := &fakeGenerator{}
+
 		got := applyOptions(
 			WithGeminiModel("gemini-flash"),
 			WithLyriaModel("lyria-3"),
 			WithRateInterval(250*time.Millisecond),
 			WithTextRateInterval(100*time.Millisecond),
 			WithExecTimeout(90*time.Second),
+			WithAudioGenerator(audio),
 		)
 
+		assert.Same(t, audio, got.audioGenerator)
 		assert.Equal(t, "gemini-flash", got.geminiModel)
 		assert.Equal(t, "lyria-3", got.lyriaModel)
 		assert.Equal(t, 250*time.Millisecond, got.rateInterval)
@@ -36,6 +40,7 @@ func TestApplyOptions(t *testing.T) {
 		assert.Zero(t, got.execTimeout)
 		assert.Zero(t, got.rateInterval)
 		assert.Zero(t, got.textRateInterval)
+		assert.Nil(t, got.audioGenerator)
 	})
 
 	t.Run("nil の Option を読み飛ばすこと", func(t *testing.T) {
