@@ -1,10 +1,13 @@
 // Package imagegen は、Vertex AI の画像モデルによる画像生成を実行します。
 //
-// 参照画像は gs:// URI だけを扱います。Vertex AI は gs:// をモデル側で解決できる
-// ため、取得もアップロードもバイト列の転送も起きず、キットが持つのはプロンプトの
-// 組み立て・シードの採番・レスポンスからの画像抽出だけです。参照画像を取得して
-// インラインで送る経路や Gemini File API を経由する経路が必要な場合は、それらを
-// 備えた gemini-image-kit を使ってください。
+// 参照画像は gs:// URI（Request.Images / Request.References）と、呼び出し側が取得済みの
+// バイト列（Request.References）を受け取ります。gs:// は Vertex AI がモデル側で解決する
+// ため、取得もアップロードも転送も起きません。
+//
+// 取得はこのパッケージの仕事ではありません。http(s) の参照画像を扱う場合、呼び出し側が
+// 取得の経路・タイムアウト・サイズ上限を決めてバイト列にしてから References へ渡します。
+// 取得方法の選択肢を抽象化して抱えると、使わない依存（HTTP クライアント、キャッシュ、
+// 再圧縮）まで全員に配ることになるためです。Gemini File API を経由する経路はありません。
 //
 // 発射間隔・上限時間・重複排除といった呼び出しガードは持ちません。クォータは
 // プロジェクト単位で操作の種類ごとではないため、画像生成だけを絞ってもテキスト生成が
@@ -90,7 +93,7 @@ func (c *Client) Generate(ctx context.Context, req Request) (*Response, error) {
 		return nil, err
 	}
 
-	attachments, err := attachmentsFor(req.Images)
+	attachments, err := referenceAttachments(req)
 	if err != nil {
 		return nil, err
 	}

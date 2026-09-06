@@ -11,9 +11,13 @@ import (
 
 // Request は画像生成 1 回分の要求です。
 //
-// Images が 1 枚なら参照付きの単発生成、複数なら参照画像を統合した融合生成、
+// 参照画像が 1 枚なら参照付きの単発生成、複数なら参照画像を統合した融合生成、
 // 空ならテキストのみの生成になります。枚数が解釈を決めるため、単発と融合で
 // 型を分けません。
+//
+// 参照画像の指定口は Images と References の 2 つで、併用はできません。gs:// だけを
+// 渡すなら Images が短く書けます。取得済みのバイト列を送る場合や、gs:// とバイト列を
+// 混ぜて順序を指定したい場合は References を使ってください。
 //
 // gemini.GenerateOptions を埋め込んでいるため、SystemPrompt / AspectRatio /
 // ImageSize / Seed / Temperature などの生成パラメータはフィールド昇格でそのまま
@@ -44,7 +48,24 @@ type Request struct {
 	// 保持されます。空文字列の要素はエラーではなく、送信対象から黙って外れます
 	// （「このキャラクターには参照画像が無い」を、呼び出し側が要素の欠落として
 	// 表現できるようにするためです）。
+	//
+	// References との併用は ErrConflictingReferences です。2 本のリストの間の順序を
+	// 決める根拠が無く、順序は生成結果を変えるためです。混在させたい場合は
+	// References に一本化してください。
 	Images []string
+	// References は参照画像を 1 本の順序付きリストで渡す口です。各要素は gs:// URI
+	// （URI を設定）か、呼び出し側が取得済みのバイト列（Data と MIMEType を設定）の
+	// どちらかです。両方を混ぜた並びも表現できます。
+	//
+	// このパッケージは取得を行いません。http(s) の参照画像を扱うなら、呼び出し側が
+	// 取得の経路・タイムアウト・サイズ上限を決めてバイト列にしてから渡してください。
+	// 取得方法の選択肢をこのパッケージが抽象化して抱えると、使わない依存
+	// （HTTP クライアント、キャッシュ、再圧縮）まで全員に配ることになります。
+	//
+	// Images と同じく、送るものが何も無い要素（gemini.Attachment.IsEmpty）は
+	// エラーではなく黙って外れます。Data と URI の併用は gemini 側の検証で
+	// ErrInvalidAttachment になります。
+	References []gemini.Attachment
 
 	gemini.GenerateOptions
 }
@@ -117,24 +138,51 @@ func applyDefaults(opts gemini.GenerateOptions) gemini.GenerateOptions {
 	return opts
 }
 
-// attachmentsFor は参照画像の gs:// URI を送信用の添付へ変換します。
+// referenceAttachments はリクエストの参照画像を送信用の添付へ変換します。
 //
-// Vertex AI は gs:// をモデル側で解決するため、バイト列の取得も転送も起きません。
-// 変換は純粋な文字列処理なので、並び順を保ったまま素直に回します。
-// MIME type は URI の拡張子から推測し、判別できない場合は設定しません
-// （理由は mimeTypeByPath を参照）。
-func attachmentsFor(uris []string) ([]gemini.Attachment, error) {
-	attachments := make([]gemini.Attachment, 0, len(uris))
-	for _, uri := range uris {
+// Images は References へ寄せてから 1 本の経路で検証します。指定口ごとに規則を
+// 書き分けると、空要素の扱いのような細部が口ごとにずれるためです。
+func referenceAttachments(req Request) ([]gemini.Attachment, error) {
+	if len(req.Images) > 0 && len(req.References) > 0 {
+		return nil, ErrConflictingReferences
+	}
+
+	refs := req.References
+	if len(refs) == 0 {
+		refs = make([]gemini.Attachment, 0, len(req.Images))
+		for _, uri := range req.Images {
+			refs = append(refs, gemini.Attachment{URI: uri})
+		}
+	}
+
+	attachments := make([]gemini.Attachment, 0, len(refs))
+	for _, ref := range refs {
 		// 参照先を持たない要素は送るものが無いので落とす（理由は Request.Images を参照）。
-		if uri == "" {
+		if ref.IsEmpty() {
 			continue
 		}
-		if !isGCSURI(uri) {
-			return nil, fmt.Errorf("%w: %q", ErrUnsupportedReference, uri)
+
+		// バイト列は呼び出し側が取得済みのもの。MIME type はバイト列からは決まらず、
+		// 誤った申告は受け取り側の解釈を壊すため、推測せず必須にする。
+		if len(ref.Data) > 0 {
+			if ref.MIMEType == "" {
+				return nil, ErrMissingReferenceMIMEType
+			}
+			attachments = append(attachments, ref)
+			continue
 		}
-		attachments = append(attachments, gemini.Attachment{URI: uri, MIMEType: mimeTypeByPath(uri)})
+
+		if !isGCSURI(ref.URI) {
+			return nil, fmt.Errorf("%w: %q", ErrUnsupportedReference, ref.URI)
+		}
+		// URI の MIME type は任意。拡張子から分かるなら添えて、分からなければ
+		// サーバー側の判定に委ねる（理由は mimeTypeByPath を参照）。
+		if ref.MIMEType == "" {
+			ref.MIMEType = mimeTypeByPath(ref.URI)
+		}
+		attachments = append(attachments, ref)
 	}
+
 	return attachments, nil
 }
 
