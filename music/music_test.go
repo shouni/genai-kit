@@ -23,10 +23,11 @@ func TestRecipeJSONWireFormat(t *testing.T) {
 		},
 		Lyrics: &LyricsDraft{Title: "Song", Theme: "theme", Hook: "hook", Lyrics: "words"},
 		AIModels: AIModels{
-			TextModel:  "gemini-test",
-			AudioModel: "lyria-test",
-			Seed:       &seed,
-			Lang:       LangJapanese,
+			TextModel:    "gemini-test",
+			AudioModel:   "lyria-test",
+			Seed:         &seed,
+			Lang:         LangJapanese,
+			LyricReading: LyricReadingKana,
 		},
 	}
 
@@ -44,7 +45,7 @@ func TestRecipeJSONWireFormat(t *testing.T) {
 	for _, key := range []string{
 		"title", "theme", "mood", "tempo", "key", "vocal_profile",
 		"instruments", "sections", "lyrics",
-		"text_model", "audio_model", "seed", "lang",
+		"text_model", "audio_model", "seed", "lang", "lyric_reading",
 	} {
 		if _, ok := raw[key]; !ok {
 			t.Errorf("キー %q がありません（ワイヤ形式が変わっています）: %s", key, data)
@@ -126,6 +127,24 @@ func TestLyricsDraftCloneIsDeep(t *testing.T) {
 
 	if cloned.Keywords[0] != "one" {
 		t.Errorf("Clone() が浅いコピーになっています: %+v", cloned)
+	}
+}
+
+// TestSendsLyricsAsWrittenDefaultsToKana は、未指定と "kana" が同じ扱い（読み表記へ変換する）で、
+// "original" だけが変換を止めることを保証します。既存の recipe.json には項目が無いので、
+// 未指定が既定と一致していないと過去のレシピの挙動が変わります。
+func TestSendsLyricsAsWrittenDefaultsToKana(t *testing.T) {
+	for _, tt := range []struct {
+		reading string
+		want    bool
+	}{
+		{"", false},
+		{LyricReadingKana, false},
+		{LyricReadingOriginal, true},
+	} {
+		if got := (AIModels{LyricReading: tt.reading}).SendsLyricsAsWritten(); got != tt.want {
+			t.Errorf("SendsLyricsAsWritten(%q) = %v, want %v", tt.reading, got, tt.want)
+		}
 	}
 }
 

@@ -65,11 +65,6 @@ func New(aiClient gemini.Generator, textPrompts TextPromptBuilder, audioPrompts 
 		callguard.WithExecTimeout(opts.execTimeout),
 	)
 
-	converter := opts.readingConverter
-	if converter == nil {
-		converter = noopReadingConverter{}
-	}
-
 	textGen := &textGenerator{
 		aiClient:     aiClient,
 		prompts:      textPrompts,
@@ -83,7 +78,6 @@ func New(aiClient gemini.Generator, textPrompts TextPromptBuilder, audioPrompts 
 		audio: &audioGenerator{
 			aiClient:          aiClient,
 			prompts:           audioPrompts,
-			converter:         converter,
 			guard:             audioGuard,
 			defaultLyriaModel: opts.lyriaModel,
 		},
@@ -101,6 +95,6 @@ func (w *Workflow) Compose(ctx context.Context, ai AIModels, lyrics *LyricsDraft
 }
 
 // GenerateAudio は楽曲レシピから曲全体の音声を生成します。
-func (w *Workflow) GenerateAudio(ctx context.Context, recipe *MusicRecipe, images []ImagePayload) ([]byte, error) {
+func (w *Workflow) GenerateAudio(ctx context.Context, recipe *MusicRecipe, images []ImagePayload) (*Track, error) {
 	return w.audio.GenerateAudio(ctx, recipe, images)
 }

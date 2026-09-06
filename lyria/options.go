@@ -11,7 +11,6 @@ type options struct {
 	lyriaModel       string
 	rateInterval     time.Duration
 	textRateInterval time.Duration
-	readingConverter ReadingConverter
 	execTimeout      time.Duration
 }
 
@@ -29,13 +28,6 @@ func WithGeminiModel(value string) Option {
 func WithLyriaModel(value string) Option {
 	return func(opts *options) {
 		opts.lyriaModel = value
-	}
-}
-
-// WithReadingConverter は、プロンプトを読み上げ向けの表記へ変換する実装を注入します。
-func WithReadingConverter(converter ReadingConverter) Option {
-	return func(opts *options) {
-		opts.readingConverter = converter
 	}
 }
 
