@@ -1,8 +1,10 @@
 // Package gemini は、Vertex AI 向けの genai SDK をラップし、
 // リトライ設定とレスポンス抽出を備えたクライアントを提供します。
 //
-// バックエンドは Vertex AI に固定です。認証は Application Default Credentials
-// (ADC) に従い、Config には ProjectID と LocationID を渡します。
+// バックエンドは Vertex AI です。認証は Application Default Credentials (ADC) に
+// 従い、Config には ProjectID と LocationID を渡します。Config.APIKey を指定した
+// 場合だけ Gemini API (Google AI Studio) へ切り替わりますが、これは Vertex AI に
+// 無いモデルのための暫定的な例外です（Config.APIKey を参照）。
 //
 // 公開 API に genai の型は現れません。設定値の型と定数は別名として再エクスポート
 // してあるため（ThinkingLevel / SafetyThreshold / Schema / SchemaType /
@@ -33,7 +35,8 @@ type Client struct {
 	requestTimeout time.Duration
 }
 
-// New は提供された設定に基づいて、新しい Vertex AI クライアントを作成します。
+// New は提供された設定に基づいて、新しいクライアントを作成します。
+// バックエンドは Config が決めます（既定は Vertex AI）。
 func New(ctx context.Context, cfg Config) (*Client, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err

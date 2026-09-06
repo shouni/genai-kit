@@ -11,8 +11,10 @@ import (
 )
 
 var (
-	// ErrConfigRequired は、ProjectID と LocationID のいずれも設定されていない場合に返されます。
-	ErrConfigRequired = errors.New("gemini: ProjectID and LocationID are required")
+	// ErrConfigRequired は、ProjectID/LocationID と APIKey のいずれも設定されていない場合に返されます。
+	ErrConfigRequired = errors.New("gemini: either ProjectID/LocationID or APIKey is required")
+	// ErrExclusiveConfig は、ProjectID/LocationID と APIKey が同時に設定された場合に返されます。
+	ErrExclusiveConfig = errors.New("gemini: ProjectID/LocationID and APIKey are mutually exclusive")
 	// ErrIncompleteVertexConfig は、ProjectID と LocationID の一方のみが設定された場合に返されます。
 	ErrIncompleteVertexConfig = errors.New("gemini: Vertex AI requires both ProjectID and LocationID")
 )
@@ -28,11 +30,22 @@ const (
 
 // Config は初期化用の設定です。
 //
-// このパッケージは Vertex AI 専用のため、ProjectID と LocationID は必須です。
-// 認証は Application Default Credentials (ADC) に従います。
+// 通常は Vertex AI を使います。ProjectID と LocationID を指定し、認証は
+// Application Default Credentials (ADC) に従います。APIKey はそれが選べない
+// モデルのための暫定的な例外です。
 type Config struct {
 	ProjectID  string // Google Cloud Project ID
 	LocationID string // Location (e.g., "us-central1")
+
+	// APIKey は Gemini API (Google AI Studio) バックエンドを使う場合のキーです。
+	// ProjectID/LocationID とは排他で、指定するとバックエンドが切り替わります。
+	//
+	// 暫定的な例外です。このライブラリのバックエンドは Vertex AI に寄せてあり、
+	// 呼び出し側がどちらを使っているか意識せずに済むことに価値があります。それでも
+	// 残しているのは、最新の Lyria が Vertex AI では提供されておらず、音楽生成だけが
+	// API キー経路でしか動かないためです。Vertex AI で使えるようになった時点で、
+	// このフィールドと validate / toClientConfig の分岐ごと削除してください。
+	APIKey string
 
 	// MaxRetries は、1 回の呼び出しで許すリトライの回数です（初回実行は含みません）。
 	// 0 は未設定で、DefaultMaxRetries を使います。リトライを止めたい場合は
@@ -70,14 +83,31 @@ type Config struct {
 //
 // 未設定（両方空）と書きかけ（片方だけ）を分けているのは、前者が「設定を渡し忘れた」、
 // 後者が「片方の環境変数が空だった」という別々の間違いだからです。
+//
+// APIKey と Vertex AI の設定が同時に来た場合はどちらを使うか決められないため、
+// 黙って一方を選ばずにエラーにします。
 func (c Config) validate() error {
-	if c.ProjectID == "" && c.LocationID == "" {
+	hasVertexField := c.ProjectID != "" || c.LocationID != ""
+
+	if hasVertexField && c.APIKey != "" {
+		return ErrExclusiveConfig
+	}
+	if !hasVertexField {
+		if c.APIKey != "" {
+			return nil
+		}
 		return ErrConfigRequired
 	}
 	if c.ProjectID == "" || c.LocationID == "" {
 		return ErrIncompleteVertexConfig
 	}
 	return nil
+}
+
+// usesAPIKey は、Gemini API バックエンドを使う設定かを返します。
+// validate 済みの Config では、APIKey が入っていることがそのまま条件になります。
+func (c Config) usesAPIKey() bool {
+	return c.APIKey != ""
 }
 
 // toClientConfig Config を genai.ClientConfig に変換します。
@@ -88,12 +118,16 @@ func (c Config) validate() error {
 // （CREDENTIALS_MISSING）になります。つまり素の &http.Client{Timeout: ...} を渡すと、
 // タイムアウトを設定したつもりで認証を捨てることになります。
 func (c Config) toClientConfig() (*genai.ClientConfig, error) {
-	cc := &genai.ClientConfig{
-		Project:  c.ProjectID,
-		Location: c.LocationID,
-		Backend:  genai.BackendVertexAI,
-	}
+	cc := &genai.ClientConfig{}
 	cc.HTTPOptions.RetryOptions = c.retryOptions()
+	if c.usesAPIKey() {
+		cc.APIKey = c.APIKey
+		cc.Backend = genai.BackendGeminiAPI
+	} else {
+		cc.Project = c.ProjectID
+		cc.Location = c.LocationID
+		cc.Backend = genai.BackendVertexAI
+	}
 
 	if c.HTTPClient == nil {
 		return cc, nil
@@ -104,6 +138,10 @@ func (c Config) toClientConfig() (*genai.ClientConfig, error) {
 	clone := *c.HTTPClient
 	cc.HTTPClient = &clone
 
+	// Gemini API の認証は API キーのヘッダ付与で、Transport には依存しない。
+	if c.usesAPIKey() {
+		return cc, nil
+	}
 	if err := cc.UseDefaultCredentials(); err != nil {
 		return nil, fmt.Errorf("gemini: 指定された HTTPClient への認証情報の付与に失敗しました: %w", err)
 	}

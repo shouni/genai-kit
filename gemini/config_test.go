@@ -55,6 +55,23 @@ func TestConfigValidate(t *testing.T) {
 			cfg:  Config{LocationID: "asia-northeast1"},
 			want: ErrIncompleteVertexConfig,
 		},
+		{
+			name: "正常系: APIKey のみ",
+			cfg:  Config{APIKey: "key"},
+			want: nil,
+		},
+		{
+			// どちらを使うか決められないため、黙って一方を選ばずに落とす。
+			name: "異常系: APIKey と Vertex AI の併用",
+			cfg:  Config{ProjectID: "my-project", LocationID: "asia-northeast1", APIKey: "key"},
+			want: ErrExclusiveConfig,
+		},
+		{
+			// 書きかけの Vertex 設定より、併用そのものを先に知らせる。
+			name: "異常系: APIKey と書きかけの Vertex 設定",
+			cfg:  Config{ProjectID: "my-project", APIKey: "key"},
+			want: ErrExclusiveConfig,
+		},
 	}
 
 	for _, tt := range tests {
@@ -73,26 +90,77 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-// TestConfigToClientConfig は、Vertex AI 固定のクライアント設定が組み上がることを
-// 検証します。バックエンドの分岐はもう無いため、Backend は常に Vertex AI です。
+// TestConfigToClientConfig は、設定からクライアント設定が組み上がることを検証します。
+// APIKey を指定した場合だけ Gemini API バックエンドへ切り替わります。
 func TestConfigToClientConfig(t *testing.T) {
-	got, err := Config{ProjectID: "proj-v", LocationID: "loc-v"}.toClientConfig()
+	t.Run("Vertex AI", func(t *testing.T) {
+		got, err := Config{ProjectID: "proj-v", LocationID: "loc-v"}.toClientConfig()
+		if err != nil {
+			t.Fatalf("toClientConfig() error = %v", err)
+		}
+
+		if got.Project != "proj-v" || got.Location != "loc-v" {
+			t.Errorf("project/location = %q/%q", got.Project, got.Location)
+		}
+		if got.Backend != genai.BackendVertexAI {
+			t.Errorf("Backend = %v, want Vertex AI", got.Backend)
+		}
+		// HTTPClient を渡していないので、ADC の検出は SDK 側に委ねられる。
+		if got.HTTPClient != nil {
+			t.Errorf("HTTPClient = %+v, want nil (SDK の既定に委ねる)", got.HTTPClient)
+		}
+		if got.HTTPOptions.RetryOptions == nil {
+			t.Error("RetryOptions がクライアント設定に載っていません")
+		}
+	})
+
+	t.Run("Gemini API", func(t *testing.T) {
+		got, err := Config{APIKey: "key"}.toClientConfig()
+		if err != nil {
+			t.Fatalf("toClientConfig() error = %v", err)
+		}
+
+		if got.APIKey != "key" {
+			t.Errorf("APIKey = %q", got.APIKey)
+		}
+		if got.Backend != genai.BackendGeminiAPI {
+			t.Errorf("Backend = %v, want Gemini API", got.Backend)
+		}
+		// Vertex AI の項目を巻き込まないこと。載せると SDK 側の判定を惑わせる。
+		if got.Project != "" || got.Location != "" {
+			t.Errorf("project/location = %q/%q, want いずれも空", got.Project, got.Location)
+		}
+		if got.HTTPOptions.RetryOptions == nil {
+			t.Error("RetryOptions がクライアント設定に載っていません")
+		}
+	})
+}
+
+// TestToClientConfigKeepsSuppliedHTTPClientForAPIKey は、API キー経路で HTTPClient を
+// 渡しても ADC の付与を試みないことを検証します。
+//
+// Gemini API の認証はキーのヘッダ付与で、Transport には依存しません。ここで
+// UseDefaultCredentials を呼ぶと、ADC の無い環境（API キーだけを持つ実行環境が
+// まさにそれです）でクライアントの生成そのものが失敗します。
+func TestToClientConfigKeepsSuppliedHTTPClientForAPIKey(t *testing.T) {
+	supplied := &http.Client{Timeout: 42 * time.Second}
+
+	got, err := Config{APIKey: "key", HTTPClient: supplied}.toClientConfig()
 	if err != nil {
 		t.Fatalf("toClientConfig() error = %v", err)
 	}
 
-	if got.Project != "proj-v" || got.Location != "loc-v" {
-		t.Errorf("project/location = %q/%q", got.Project, got.Location)
+	if got.HTTPClient == nil {
+		t.Fatal("HTTPClient がクライアント設定に載っていません")
 	}
-	if got.Backend != genai.BackendVertexAI {
-		t.Errorf("Backend = %v, want Vertex AI", got.Backend)
+	if got.HTTPClient == supplied {
+		t.Error("呼び出し側のインスタンスがそのまま使われています（複製すること）")
 	}
-	// HTTPClient を渡していないので、ADC の検出は SDK 側に委ねられる。
-	if got.HTTPClient != nil {
-		t.Errorf("HTTPClient = %+v, want nil (SDK の既定に委ねる)", got.HTTPClient)
+	if got.HTTPClient.Timeout != supplied.Timeout {
+		t.Errorf("Timeout = %v, want %v", got.HTTPClient.Timeout, supplied.Timeout)
 	}
-	if got.HTTPOptions.RetryOptions == nil {
-		t.Error("RetryOptions がクライアント設定に載っていません")
+	if got.HTTPClient.Transport != nil {
+		t.Errorf("Transport = %+v, want nil (API キー経路では認証情報を付けない)", got.HTTPClient.Transport)
 	}
 }
 
