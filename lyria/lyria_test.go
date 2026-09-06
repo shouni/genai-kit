@@ -21,7 +21,6 @@ var (
 	_ gemini.Generator   = (*fakeGenerator)(nil)
 	_ TextPromptBuilder  = (*stubTextPrompts)(nil)
 	_ AudioPromptBuilder = (*stubAudioPrompts)(nil)
-	_ ReadingConverter   = fixedReadingConverter{}
 )
 
 // generateCall は fakeGenerator が受け取った 1 回分の呼び出しです。
@@ -87,7 +86,19 @@ func textResponder(text string) *fakeGenerator {
 
 // audioResponder は、音声を返す fakeGenerator を作ります。
 func audioResponder(audio []byte) *fakeGenerator {
-	return &fakeGenerator{resp: &gemini.Response{Audios: [][]byte{audio}}}
+	return &fakeGenerator{resp: audioResponse("audio/mpeg", audio, "")}
+}
+
+// audioResponse は、Lyria の音声レスポンスをテスト用に組み立てます。
+//
+// Attachments と Audios を両方埋めるのは gemini 側の変換がそう作るためです。Audios だけの
+// レスポンスは実際には返らないので、それを模したフェイクでは MIME type の経路を検証できません。
+func audioResponse(mimeType string, audio []byte, text string) *gemini.Response {
+	return &gemini.Response{
+		Text:        text,
+		Audios:      [][]byte{audio},
+		Attachments: []gemini.Attachment{{MIMEType: mimeType, Data: audio}},
+	}
 }
 
 // stubTextPrompts は TextPromptBuilder のテストダブルです。
@@ -138,16 +149,6 @@ func (s *stubAudioPrompts) FullSongPrompt(recipe *MusicRecipe) string {
 	s.mu.Unlock()
 
 	return s.fullSong
-}
-
-// fixedReadingConverter は、入力に関わらず固定の文字列を返す ReadingConverter です。
-// 変換を通ったかどうかを、出力の文字列そのもので判別できます。
-type fixedReadingConverter struct {
-	output string
-}
-
-func (c fixedReadingConverter) ToReading(string) string {
-	return c.output
 }
 
 const validLyricsJSON = `{"title":"t","theme":"th","hook":"h","lyrics":"l"}`
@@ -241,41 +242,14 @@ func TestWorkflowDelegatesToEachRole(t *testing.T) {
 		ai := audioResponder([]byte{1, 2, 3})
 		w := newTestWorkflow(t, ai, &stubTextPrompts{}, &stubAudioPrompts{fullSong: "full prompt"})
 
-		audio, err := w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
+		track, err := w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
 
 		require.NoError(t, err)
-		assert.Equal(t, []byte{1, 2, 3}, audio)
+		assert.Equal(t, []byte{1, 2, 3}, track.Audio)
 
 		call := ai.lastCall(t)
 		assert.Equal(t, "lyria-3", call.Model)
 		assert.Equal(t, "full prompt", call.Prompt)
-	})
-}
-
-// TestNewUsesReadingConverterOption は、注入した読み仮名変換がプロンプトへ
-// 適用されることを検証します。未指定なら素通しです。
-func TestNewUsesReadingConverterOption(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("指定すれば変換されること", func(t *testing.T) {
-		ai := audioResponder([]byte{1})
-		w := newTestWorkflow(t, ai, &stubTextPrompts{}, &stubAudioPrompts{fullSong: "漢字 prompt"},
-			WithReadingConverter(fixedReadingConverter{output: "converted prompt"}))
-
-		_, err := w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
-
-		require.NoError(t, err)
-		assert.Equal(t, "converted prompt", ai.lastCall(t).Prompt)
-	})
-
-	t.Run("未指定なら素通しであること", func(t *testing.T) {
-		ai := audioResponder([]byte{1})
-		w := newTestWorkflow(t, ai, &stubTextPrompts{}, &stubAudioPrompts{fullSong: "漢字 prompt"})
-
-		_, err := w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
-
-		require.NoError(t, err)
-		assert.Equal(t, "漢字 prompt", ai.lastCall(t).Prompt)
 	})
 }
 
@@ -290,7 +264,7 @@ func TestTextAndAudioHaveSeparateRateGuards(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			ai := &fakeGenerator{respond: func(call generateCall) (*gemini.Response, error) {
 				if call.Model == "lyria-3" {
-					return &gemini.Response{Audios: [][]byte{{1}}}, nil
+					return audioResponse("audio/mpeg", []byte{1}, ""), nil
 				}
 				return &gemini.Response{Text: validLyricsJSON}, nil
 			}}
@@ -319,7 +293,7 @@ func TestTextAndAudioHaveSeparateRateGuards(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			ai := &fakeGenerator{respond: func(call generateCall) (*gemini.Response, error) {
 				if call.Model == "lyria-3" {
-					return &gemini.Response{Audios: [][]byte{{1}}}, nil
+					return audioResponse("audio/mpeg", []byte{1}, ""), nil
 				}
 				return &gemini.Response{Text: validLyricsJSON}, nil
 			}}

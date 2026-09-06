@@ -13,16 +13,27 @@ import (
 )
 
 // newAudioGenerator は、発射間隔なしの audioGenerator を組み立てます。
-func newAudioGenerator(ai gemini.Generator, prompts AudioPromptBuilder, converter ReadingConverter) *audioGenerator {
-	if converter == nil {
-		converter = noopReadingConverter{}
-	}
+func newAudioGenerator(ai gemini.Generator, prompts AudioPromptBuilder) *audioGenerator {
 	return &audioGenerator{
 		aiClient:          ai,
 		prompts:           prompts,
-		converter:         converter,
 		defaultLyriaModel: "lyria-3",
 	}
+}
+
+// TestTrackCloneIsIndependent は、複製した Track の書き換えが元へ波及しないことを
+// 検証します。生成結果は singleflight で同時呼び出しの間に共有されます。
+func TestTrackCloneIsIndependent(t *testing.T) {
+	src := &Track{Audio: []byte{1, 2, 3}, MIMEType: "audio/mpeg", SungLyrics: "sung"}
+
+	dst := src.Clone()
+	dst.Audio[0] = 9
+	dst.MIMEType = "audio/wav"
+
+	assert.Equal(t, byte(1), src.Audio[0])
+	assert.Equal(t, "audio/mpeg", src.MIMEType)
+	assert.Equal(t, "sung", dst.SungLyrics)
+	assert.Nil(t, (*Track)(nil).Clone())
 }
 
 // TestGenerateAudioSendsPromptAndImages は、組み立てたプロンプトと画像が
@@ -30,14 +41,14 @@ func newAudioGenerator(ai gemini.Generator, prompts AudioPromptBuilder, converte
 func TestGenerateAudioSendsPromptAndImages(t *testing.T) {
 	ai := audioResponder([]byte{1, 2, 3})
 	prompts := &stubAudioPrompts{fullSong: "full prompt"}
-	g := newAudioGenerator(ai, prompts, nil)
+	g := newAudioGenerator(ai, prompts)
 
 	recipe := &MusicRecipe{Title: "Song"}
 	images := []ImagePayload{{Data: []byte("cover"), MIMEType: "image/png"}}
 
-	audio, err := g.GenerateAudio(context.Background(), recipe, images)
+	track, err := g.GenerateAudio(context.Background(), recipe, images)
 	require.NoError(t, err)
-	assert.Equal(t, []byte{1, 2, 3}, audio)
+	assert.Equal(t, []byte{1, 2, 3}, track.Audio)
 
 	assert.Same(t, recipe, prompts.gotRecipe, "プロンプト構築にレシピがそのまま渡ること")
 
@@ -64,7 +75,7 @@ func TestGenerateAudioResolvesModel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ai := audioResponder([]byte{1})
-			g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "p"}, nil)
+			g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "p"})
 
 			_, err := g.GenerateAudio(context.Background(),
 				&MusicRecipe{Title: "Song", AIModels: AIModels{AudioModel: tt.audioModel}}, nil)
@@ -75,32 +86,38 @@ func TestGenerateAudioResolvesModel(t *testing.T) {
 	}
 }
 
-// TestGenerateAudioAppliesReadingConverterByLanguage は、読み仮名変換が日本語の
-// レシピにだけ掛かることを検証します。Lang 未指定は日本語扱いです。
-func TestGenerateAudioAppliesReadingConverterByLanguage(t *testing.T) {
-	tests := []struct {
-		name string
-		lang string
-		want string
-	}{
-		{"未指定は日本語扱いで変換される", "", "converted prompt"},
-		{"日本語は変換される", LangJapanese, "converted prompt"},
-		{"英語は変換しない", LangEnglish, "original prompt"},
-	}
+// TestGenerateAudioReturnsMIMETypeAndSungLyrics は、レスポンスが載せてきたものが音声バイト列
+// だけでなく呼び出し元へ届くことを検証します。MIME type はバイト列からの推測に頼ることになり
+// （WAV と MP3 は取り違えます）、譜面のテキストに至っては復元する手立てがありません。
+func TestGenerateAudioReturnsMIMETypeAndSungLyrics(t *testing.T) {
+	ai := &fakeGenerator{resp: audioResponse("audio/mpeg", []byte{1, 2, 3}, "[[V1]]\n[:] sung line")}
+	g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "p"})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ai := audioResponder([]byte{1})
-			g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "original prompt"},
-				fixedReadingConverter{output: "converted prompt"})
+	track, err := g.GenerateAudio(context.Background(), &MusicRecipe{Title: "Song"}, nil)
 
-			_, err := g.GenerateAudio(context.Background(),
-				&MusicRecipe{Title: "Song", AIModels: AIModels{Lang: tt.lang}}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []byte{1, 2, 3}, track.Audio)
+	assert.Equal(t, "audio/mpeg", track.MIMEType)
+	assert.Equal(t, "[[V1]]\n[:] sung line", track.SungLyrics)
+}
 
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, ai.lastCall(t).Prompt)
-		})
-	}
+// TestGenerateAudioPicksTheFirstAudioAttachment は、音声以外の添付が混ざっていても音声だけが
+// 選ばれることを検証します。振り分けを自前でやる以上、ずれると画像を音声として返します。
+func TestGenerateAudioPicksTheFirstAudioAttachment(t *testing.T) {
+	ai := &fakeGenerator{resp: &gemini.Response{
+		Attachments: []gemini.Attachment{
+			{MIMEType: "image/png", Data: []byte("cover")},
+			{MIMEType: "audio/wav", Data: []byte{1, 2, 3}},
+			{MIMEType: "audio/mpeg", Data: []byte{9}},
+		},
+	}}
+	g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "p"})
+
+	track, err := g.GenerateAudio(context.Background(), &MusicRecipe{Title: "Song"}, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, []byte{1, 2, 3}, track.Audio)
+	assert.Equal(t, "audio/wav", track.MIMEType)
 }
 
 // TestGenerateAudioKeepsSeed は、レシピのシードが生成呼び出しへ渡ることを
@@ -108,7 +125,7 @@ func TestGenerateAudioAppliesReadingConverterByLanguage(t *testing.T) {
 func TestGenerateAudioKeepsSeed(t *testing.T) {
 	seed := int64(42)
 	ai := audioResponder([]byte{1})
-	g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "p"}, nil)
+	g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "p"})
 
 	_, err := g.GenerateAudio(context.Background(),
 		&MusicRecipe{Title: "Song", AIModels: AIModels{Seed: &seed}}, nil)
@@ -137,19 +154,27 @@ func TestGenerateAudioErrorBranches(t *testing.T) {
 			wantErr: ErrNoAudio,
 		},
 		{
+			// 音声生成でテキストだけが返るのは、歌詞は書けたが音を出せなかった場合です。
+			// 空の Track を返すと、呼び出し側が 0 バイトの音声を公開まで運びます。
 			name:    "音声が 1 件も含まれない",
 			ai:      &fakeGenerator{resp: &gemini.Response{Text: "説明だけ"}},
+			wantErr: ErrNoAudio,
+		},
+		{
+			name:    "音声以外の添付しかない",
+			ai:      &fakeGenerator{resp: &gemini.Response{Attachments: []gemini.Attachment{{MIMEType: "image/png", Data: []byte("cover")}}}},
 			wantErr: ErrNoAudio,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := newAudioGenerator(tt.ai, &stubAudioPrompts{fullSong: "p"}, nil)
+			g := newAudioGenerator(tt.ai, &stubAudioPrompts{fullSong: "p"})
 
-			_, err := g.GenerateAudio(context.Background(), &MusicRecipe{Title: "Song"}, nil)
+			track, err := g.GenerateAudio(context.Background(), &MusicRecipe{Title: "Song"}, nil)
 
 			require.Error(t, err)
+			assert.Nil(t, track)
 			if tt.wantErr != nil {
 				assert.ErrorIs(t, err, tt.wantErr)
 			}
@@ -158,7 +183,7 @@ func TestGenerateAudioErrorBranches(t *testing.T) {
 }
 
 func TestGenerateAudioRejectsNilRecipe(t *testing.T) {
-	g := newAudioGenerator(&fakeGenerator{}, &stubAudioPrompts{}, nil)
+	g := newAudioGenerator(&fakeGenerator{}, &stubAudioPrompts{})
 
 	_, err := g.GenerateAudio(context.Background(), nil, nil)
 
@@ -170,15 +195,15 @@ func TestGenerateAudioRejectsNilRecipe(t *testing.T) {
 func TestGenerateAudioDeduplicatesConcurrentCalls(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
-		ai := &fakeGenerator{block: release, resp: &gemini.Response{Audios: [][]byte{{1, 2, 3}}}}
-		g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "full prompt"}, nil)
+		ai := &fakeGenerator{block: release, resp: audioResponse("audio/mpeg", []byte{1, 2, 3}, "sung lyrics")}
+		g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "full prompt"})
 
 		seed := int64(7)
 		recipe := &MusicRecipe{Title: "Song", AIModels: AIModels{Seed: &seed}}
 		images := []ImagePayload{{Data: []byte("cover"), MIMEType: "image/png"}}
 
 		const callers = 5
-		results := make([][]byte, callers)
+		results := make([]*Track, callers)
 		errs := make([]error, callers)
 
 		var wg sync.WaitGroup
@@ -198,8 +223,11 @@ func TestGenerateAudioDeduplicatesConcurrentCalls(t *testing.T) {
 		}
 
 		// 共有結果ではなく複製が返っていること。
-		results[0][0] = 9
-		assert.Equal(t, byte(1), results[1][0], "音声のバイト列が共有されています")
+		require.NotSame(t, results[0], results[1])
+		results[0].Audio[0] = 9
+		assert.Equal(t, byte(1), results[1].Audio[0], "音声のバイト列が共有されています")
+		// 音声と一緒に返ったテキストは全員へ届く。
+		assert.Equal(t, "sung lyrics", results[1].SungLyrics)
 	})
 }
 
@@ -209,8 +237,8 @@ func TestGenerateAudioDeduplicatesConcurrentCalls(t *testing.T) {
 func TestGenerateAudioSeparatesDifferentImages(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
-		ai := &fakeGenerator{block: release, resp: &gemini.Response{Audios: [][]byte{{1, 2, 3}}}}
-		g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "full prompt"}, nil)
+		ai := &fakeGenerator{block: release, resp: audioResponse("audio/mpeg", []byte{1, 2, 3}, "sung lyrics")}
+		g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "full prompt"})
 
 		seed := int64(7)
 		recipe := &MusicRecipe{Title: "Song", AIModels: AIModels{Seed: &seed}}
@@ -263,10 +291,4 @@ func TestImagesHashDistinguishesContentAndType(t *testing.T) {
 
 	assert.NotEqual(t, imagesHash(base), imagesHash(otherData))
 	assert.NotEqual(t, imagesHash(base), imagesHash(otherType))
-}
-
-// TestNoopReadingConverterPassesThrough は、既定の変換器が入力を変えないことを
-// 検証します。読み仮名変換を注入しない呼び出し側の挙動そのものです。
-func TestNoopReadingConverterPassesThrough(t *testing.T) {
-	assert.Equal(t, "漢字のまま", noopReadingConverter{}.ToReading("漢字のまま"))
 }
