@@ -25,8 +25,7 @@ golangci-lint run                            # config in .golangci.yml
 go test ./gemini -run '^$' -fuzz FuzzCleanJSONResponse -fuzztime 60s
 ```
 
-Note: a locally installed golangci-lint v2.13.1 panics on the `veo` package (staticcheck SA4023 crash, unrelated to this code). Lint the other packages explicitly if you hit it:
-`golangci-lint run ./gemini/... ./imagegen/... ./lyria/... ./music/... ./callguard/... ./internal/...`
+Note: **SA4023 is disabled in `.golangci.yml`** because staticcheck v0.8.0 (bundled with golangci-lint v2.13.1) panics analysing the `veo` package — a nilness fact lookup runs off the end of a slice, which is an upstream bug unrelated to this code. It surfaces only with a warm analysis cache, which is why CI hit it (the action restores a cache) on a commit that changed `gemini` while a cold local run stayed green — so "it passes on my machine" proves nothing here. The crash takes down `goanalysis_metalinter`, so the choice is one check or all of staticcheck. Re-check whether it can be restored when the bundled staticcheck moves.
 
 ## Package layout
 
