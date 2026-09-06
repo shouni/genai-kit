@@ -12,6 +12,7 @@ type options struct {
 	rateInterval     time.Duration
 	textRateInterval time.Duration
 	execTimeout      time.Duration
+	audioGenerator   gemini.Generator
 }
 
 // Option は Workflow の構築時設定です。
@@ -28,6 +29,19 @@ func WithGeminiModel(value string) Option {
 func WithLyriaModel(value string) Option {
 	return func(opts *options) {
 		opts.lyriaModel = value
+	}
+}
+
+// WithAudioGenerator は、音声生成（Lyria）にだけ使う生成クライアントを差し替えます。
+// 未指定なら New に渡した aiClient を作詞・作曲と共用します。
+//
+// genai SDK が Lyria の出力フォーマットを指定できるようになるまでの間、音声だけを
+// REST 直叩きの実装へ逃がすための口です。差し替え点をここ（gemini.Generator）に置くのは、
+// Workflow・Track・呼び出しガード・プロンプト構築をそのまま使い回し、戻すときは
+// このオプションを外すだけにするためです。
+func WithAudioGenerator(g gemini.Generator) Option {
+	return func(opts *options) {
+		opts.audioGenerator = g
 	}
 }
 
