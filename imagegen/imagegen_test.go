@@ -98,6 +98,32 @@ func TestGenerateSendsPromptAndReferences(t *testing.T) {
 	assert.Equal(t, "a cat on a roof", got.Prompt)
 }
 
+// TestGenerateSendsInlineReferences は、呼び出し側が取得済みのバイト列が、gs:// と
+// 混ざった順序のまま AI へ届くことを検証します。
+//
+// 取得はこのパッケージの仕事ではありません。http(s) の参照画像を扱う呼び出し側は、
+// 取得の経路・タイムアウト・サイズ上限を自分で決めてバイト列にし、References へ渡します。
+func TestGenerateSendsInlineReferences(t *testing.T) {
+	ai := imageResponder("image/png", []byte("png-bytes"))
+	client, err := New(ai)
+	require.NoError(t, err)
+
+	_, err = client.Generate(context.Background(), Request{
+		Model:  "imagen-test",
+		Prompt: "a cat on a roof",
+		References: []gemini.Attachment{
+			{URI: "gs://bucket/char.png"},
+			{Data: []byte("downloaded"), MIMEType: "image/webp"},
+		},
+	})
+	require.NoError(t, err)
+
+	call := ai.lastCall(t)
+	require.Len(t, call.Attachments, 2)
+	assert.Equal(t, gemini.Attachment{URI: "gs://bucket/char.png", MIMEType: "image/png"}, call.Attachments[0])
+	assert.Equal(t, gemini.Attachment{Data: []byte("downloaded"), MIMEType: "image/webp"}, call.Attachments[1])
+}
+
 // TestGenerateMintsSeedBeforeSending は、シードを送信前に採番することを検証します。
 //
 // API はレスポンスに採番したシードを返さないため、API 任せにすると UsedSeed が 0 の

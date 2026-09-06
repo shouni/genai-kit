@@ -45,8 +45,10 @@ godoc を読んでも気付けないことだけです。
   * **構造化出力でも `CleanJSONResponse` を通してください。** `ResponseSchema` を指定しても、
     モデルは完結した JSON の後ろに説明文を継ぎ足したり、複数行の本文の中に生の改行を入れたりします。
     **どれも応答を返しきったあとの話なので、API の再試行では直りません。**
-* **`imagegen`**: 参照画像（`gs://`）付きの画像生成。プロンプト結合・シード採番・既定値・画像抽出を
-  引き受けます。詳しくは[参照画像と既定値](#-参照画像と既定値-imagegen)。
+* **`imagegen`**: 参照画像付きの画像生成。プロンプト結合・シード採番・既定値・画像抽出を
+  引き受けます。参照画像は `gs://`（`Images`）と、呼び出し側が取得済みのバイト列（`References`）です。
+  **取得はこのパッケージの仕事ではありません** — HTTP の参照画像は、取得の経路・タイムアウト・
+  サイズ上限を呼び出し側が決めてバイト列で渡します。詳しくは[参照画像と既定値](#-参照画像と既定値-imagegen)。
 * **`music`**: 楽曲構成のデータ型（`Recipe` / `Section` / `LyricsDraft` / `AIModels`）。依存を持たない
   葉パッケージで、レシピを読み書きするだけの下流サービスがワークフロー本体を輸入せずに済みます。
   JSON タグは snake_case で、**保存済みレシピ JSON との互換性の契約**です。
@@ -140,8 +142,8 @@ Cloud Run などの環境では API キーをアプリケーションに持た�
 
 添付付きの生成・画像生成・音楽生成・動画生成の例は
 [pkg.go.dev](https://pkg.go.dev/github.com/shouni/genai-kit) にあります。
-**踏むと高くつく点も、それぞれの godoc に書いてあります** — 参照画像が `gs://` のみで、HTTP 取得も
-File API 経由も無いこと（`imagegen` パッケージ）、`NegativePrompt` の区切りが互換性の契約であること、
+**踏むと高くつく点も、それぞれの godoc に書いてあります** — 参照画像の URI が `gs://` のみで、HTTP 取得も
+File API 経由も持たないこと（`imagegen` パッケージ）、`NegativePrompt` の区切りが互換性の契約であること、
 安全フィルタと人物生成に既定値が補われること（`imagegen.Request`）、発射間隔も重複排除も持たないので
 `callguard` でデコレートしてテキスト生成と `Guard` を共有すること（`imagegen.Client`）。
 
@@ -152,7 +154,7 @@ File API 経由も無いこと（`imagegen` パッケージ）、`NegativePrompt
 | | [go-gemini-client](https://github.com/shouni/go-gemini-client) | genai-kit |
 | --- | --- | --- |
 | バックエンド | Gemini API（API キー）と Vertex AI | **Vertex AI が既定**（API キーは暫定サポート） |
-| 参照画像 | File API へ上げてキャッシュする経路を持つ | **`gs://` をモデル側に解決させる**（転送が起きない） |
+| 参照画像 | 取得・アップロード・キャッシュの経路を内蔵 | **`gs://` はモデル側に解決させ**（転送が起きない）、取得は呼び出し側の仕事 |
 | 画像生成 | [gemini-image-kit](https://github.com/shouni/gemini-image-kit) へ委譲 | `imagegen` を内蔵 |
 
 API キーを配る必要が無く、参照画像が GCS にあるなら genai-kit です。Gemini API の File API に

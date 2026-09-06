@@ -111,19 +111,19 @@ func TestPrepareAcceptsNegativePromptOnly(t *testing.T) {
 	assert.Contains(t, got.prompt, "blurry")
 }
 
-// TestAttachmentsForKeepsOrderAndDropsEmpty は、参照画像の並び順が保たれ、
+// TestReferenceAttachmentsKeepsOrderAndDropsEmpty は、参照画像の並び順が保たれ、
 // 空文字列の要素が黙って外れることを検証します。
 //
 // 空要素を落とすのは、「このキャラクターには参照画像が無い」を呼び出し側が
 // 要素の欠落として表現できるようにするためです。
-func TestAttachmentsForKeepsOrderAndDropsEmpty(t *testing.T) {
+func TestReferenceAttachmentsKeepsOrderAndDropsEmpty(t *testing.T) {
 	t.Parallel()
 
-	got, err := attachmentsFor([]string{
+	got, err := referenceAttachments(Request{Images: []string{
 		"gs://bucket/a.png",
 		"",
 		"gs://bucket/b.webp",
-	})
+	}})
 	require.NoError(t, err)
 
 	require.Len(t, got, 2)
@@ -131,17 +131,17 @@ func TestAttachmentsForKeepsOrderAndDropsEmpty(t *testing.T) {
 	assert.Equal(t, "gs://bucket/b.webp", got[1].URI)
 }
 
-// TestAttachmentsForHintsMIMETypeFromExtension は、拡張子から MIME type を推測し、
+// TestReferenceAttachmentsHintsMIMETypeFromExtension は、拡張子から MIME type を推測し、
 // 判別できない場合は申告しないことを検証します。誤った申告は受け取った側の解釈を
 // 壊すため、サーバー側の判定に委ねます。
-func TestAttachmentsForHintsMIMETypeFromExtension(t *testing.T) {
+func TestReferenceAttachmentsHintsMIMETypeFromExtension(t *testing.T) {
 	t.Parallel()
 
-	got, err := attachmentsFor([]string{
+	got, err := referenceAttachments(Request{Images: []string{
 		"gs://bucket/a.png",
 		"gs://bucket/b.JPEG",
 		"gs://bucket/c",
-	})
+	}})
 	require.NoError(t, err)
 
 	require.Len(t, got, 3)
@@ -150,14 +150,64 @@ func TestAttachmentsForHintsMIMETypeFromExtension(t *testing.T) {
 	assert.Empty(t, got[2].MIMEType, "判別できない拡張子は申告しない")
 }
 
-func TestAttachmentsForRejectsNonGCSReferences(t *testing.T) {
+func TestReferenceAttachmentsRejectsNonGCSURIs(t *testing.T) {
 	t.Parallel()
 
 	for _, uri := range []string{"https://example.com/a.png", "file:///tmp/a.png", "a.png"} {
-		_, err := attachmentsFor([]string{uri})
+		_, err := referenceAttachments(Request{Images: []string{uri}})
 
 		assert.ErrorIs(t, err, ErrUnsupportedReference, "uri = %q", uri)
 	}
+}
+
+// TestReferenceAttachmentsAcceptsInlineBytes は、呼び出し側が取得済みのバイト列を
+// gs:// と混ぜた順序のまま渡せることを検証します。
+//
+// 順序は生成結果を変えるため、gs:// とバイト列を別のリストに分けると混在した並びを
+// 表現できません。References が 1 本なのはそのためです。
+func TestReferenceAttachmentsAcceptsInlineBytes(t *testing.T) {
+	t.Parallel()
+
+	got, err := referenceAttachments(Request{References: []gemini.Attachment{
+		{URI: "gs://bucket/a.png"},
+		{Data: []byte("fetched"), MIMEType: "image/webp"},
+		{},
+		{URI: "gs://bucket/b.png"},
+	}})
+	require.NoError(t, err)
+
+	require.Len(t, got, 3, "送るものが無い要素は黙って外れる")
+	assert.Equal(t, "gs://bucket/a.png", got[0].URI)
+	assert.Equal(t, []byte("fetched"), got[1].Data)
+	assert.Equal(t, "image/webp", got[1].MIMEType)
+	assert.Equal(t, "gs://bucket/b.png", got[2].URI)
+}
+
+// TestReferenceAttachmentsRequiresMIMETypeForInlineBytes は、バイト列に MIME type が
+// 要ることを検証します。バイト列からは型が決まらず、誤った申告は受け取り側の解釈を
+// 壊すため、推測せずに要求します。
+func TestReferenceAttachmentsRequiresMIMETypeForInlineBytes(t *testing.T) {
+	t.Parallel()
+
+	_, err := referenceAttachments(Request{References: []gemini.Attachment{
+		{Data: []byte("fetched")},
+	}})
+
+	assert.ErrorIs(t, err, ErrMissingReferenceMIMEType)
+}
+
+// TestReferenceAttachmentsRejectsBothInputs は、Images と References の併用を
+// 弾くことを検証します。2 本のリストの間の順序を決める根拠が無く、黙って連結すると
+// 呼び出し側が意図しない並びで送られます。
+func TestReferenceAttachmentsRejectsBothInputs(t *testing.T) {
+	t.Parallel()
+
+	_, err := referenceAttachments(Request{
+		Images:     []string{"gs://bucket/a.png"},
+		References: []gemini.Attachment{{URI: "gs://bucket/b.png"}},
+	})
+
+	assert.ErrorIs(t, err, ErrConflictingReferences)
 }
 
 // TestNewSeedStaysWithinInt32 は、採番したシードが gemini の受け付ける範囲に
