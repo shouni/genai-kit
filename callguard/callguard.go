@@ -15,8 +15,11 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
+	"log/slog"
+	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -26,6 +29,13 @@ import (
 
 // DefaultExecTimeout は、共有実行 1 回あたりの上限時間の既定値です。
 const DefaultExecTimeout = 5 * time.Minute
+
+// ErrPanicked は、共有実行の fn が panic したことを表します。
+//
+// fn は singleflight が起こす別ゴルーチンで走るため、呼び出し側の recover は届きません。
+// 放置すると singleflight が panic を投げ直してプロセスごと落ち、同じプロセスに
+// 同居している他のジョブまで巻き添えになります。Do が回復してこのエラーに畳みます。
+var ErrPanicked = errors.New("callguard: shared execution panicked")
 
 // Group は、同じキーの呼び出しをまとめる単位です。ゼロ値で使えます。
 //
@@ -110,6 +120,13 @@ func (g *Guard) wait(ctx context.Context) error {
 // 発射間隔の待機は上限時間の外側で行います。待たされた時間を 1 回あたりの
 // 上限時間に数えると、混雑しているだけでタイムアウトしてしまうためです。
 //
+// すでに終わっている ctx では fn を実行しません。実行は呼び出し元から切り離される
+// ため、ここで確かめないと、結果を受け取る者のいない課金呼び出しが最後まで走ります
+// （ジョブの打ち切り後に、一括処理の残りが 1 件ずつ発射され続ける形になります）。
+// 確かめるのは合流の前だけで、合流したあとの切り離しは変わりません。
+//
+// fn の panic は回復して ErrPanicked に畳み、相乗りした全員へ同じエラーを返します。
+//
 // 戻り値は相乗りした全員で共有されます。呼び出し側が書き換える可能性があるものは
 // 複製してから返してください。
 func Do[T any](
@@ -119,8 +136,26 @@ func Do[T any](
 	key string,
 	fn func(execCtx context.Context) (T, error),
 ) (T, error) {
-	ch := group.DoChan(key, func() (any, error) {
+	if err := ctx.Err(); err != nil {
+		var zero T
+		return zero, err
+	}
+
+	ch := group.DoChan(key, func() (val any, err error) {
 		baseCtx := context.WithoutCancel(ctx)
+
+		defer func() {
+			recovered := recover()
+			if recovered == nil {
+				return
+			}
+			slog.ErrorContext(baseCtx, "callguard: shared execution panicked",
+				"key", key,
+				"panic", recovered,
+				"stack", string(debug.Stack()),
+			)
+			val, err = nil, fmt.Errorf("%w: %v", ErrPanicked, recovered)
+		}()
 
 		if err := guard.wait(baseCtx); err != nil {
 			return nil, err

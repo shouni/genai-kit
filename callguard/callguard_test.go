@@ -169,6 +169,63 @@ func TestDoPropagatesError(t *testing.T) {
 	require.ErrorIs(t, err, sentinel)
 }
 
+// TestDoSkipsExecutionWhenContextAlreadyDone は、すでに終わっている ctx では fn を
+// 実行しないことを検証します。実行は呼び出し元から切り離されるため、ここで止めないと
+// 結果を受け取る者のいない課金呼び出しが走ります。
+func TestDoSkipsExecutionWhenContextAlreadyDone(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		var group Group
+		var calls atomic.Int32
+		for range 3 {
+			_, err := Do(ctx, &group, nil, "key", func(context.Context) (int, error) {
+				calls.Add(1)
+				return 1, nil
+			})
+			require.ErrorIs(t, err, context.Canceled)
+		}
+
+		synctest.Wait()
+		require.Zero(t, calls.Load(), "キャンセル済みの ctx で fn が実行されています")
+	})
+}
+
+// TestDoRecoversPanic は、fn の panic がプロセスを落とさず ErrPanicked として
+// 相乗りした全員へ届くことを検証します。
+func TestDoRecoversPanic(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		var group Group
+		release := make(chan struct{})
+		errs := make(chan error, 2)
+
+		for range 2 {
+			go func() {
+				_, err := Do(context.Background(), &group, nil, "key",
+					func(context.Context) (int, error) {
+						<-release
+						panic("boom")
+					})
+				errs <- err
+			}()
+		}
+
+		synctest.Wait() // 2 人目が合流するまで待つ
+		close(release)
+
+		for range 2 {
+			err := <-errs
+			require.ErrorIs(t, err, ErrPanicked)
+			require.ErrorContains(t, err, "boom")
+		}
+	})
+}
+
 // TestNilGuardUsesDefaults は、nil の Guard が「制限なし・既定の上限時間」として
 // 扱えることを検証します。呼び出し側に分岐を持たせないためです。
 func TestNilGuardUsesDefaults(t *testing.T) {
