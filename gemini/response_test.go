@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"google.golang.org/genai"
@@ -64,6 +65,38 @@ func TestExtractText(t *testing.T) {
 		}
 	})
 
+	// 入力そのものが弾かれると、候補が 0 件で PromptFeedback だけが付く。これを見ないと
+	// 「空のレスポンス」として理由なしに報告され、再試行しても無駄なことが伝わらない。
+	t.Run("入力のブロックは ErrBlocked に理由つきでなること", func(t *testing.T) {
+		resp := &genai.GenerateContentResponse{
+			PromptFeedback: &genai.GenerateContentResponsePromptFeedback{
+				BlockReason:        genai.BlockedReasonProhibitedContent,
+				BlockReasonMessage: "policy",
+			},
+		}
+		_, err := extractText(resp)
+		if !errors.Is(err, ErrBlocked) {
+			t.Fatalf("extractText() error = %v, want ErrBlocked", err)
+		}
+		if errors.Is(err, ErrEmptyResponse) {
+			t.Errorf("a prompt block must not classify as ErrEmptyResponse: %v", err)
+		}
+		apiErr, ok := errors.AsType[*APIResponseError](err)
+		if !ok || apiErr.BlockReason != genai.BlockedReasonProhibitedContent {
+			t.Errorf("BlockReason not carried: %+v", err)
+		}
+		if !strings.Contains(err.Error(), "policy") {
+			t.Errorf("BlockReasonMessage not carried: %v", err)
+		}
+	})
+
+	t.Run("理由の無い PromptFeedback は空レスポンスのまま", func(t *testing.T) {
+		resp := &genai.GenerateContentResponse{PromptFeedback: &genai.GenerateContentResponsePromptFeedback{}}
+		if _, err := extractText(resp); !errors.Is(err, ErrEmptyResponse) {
+			t.Errorf("extractText() error = %v, want ErrEmptyResponse", err)
+		}
+	})
+
 	t.Run("nil の候補スロットは ErrEmptyResponse になること", func(t *testing.T) {
 		// 候補スロット自体もサーバー由来の値で nil があり得ます。
 		_, err := extractText(&genai.GenerateContentResponse{Candidates: []*genai.Candidate{nil}})
@@ -103,13 +136,15 @@ func TestFinishReasonHasTwoUnsetValues(t *testing.T) {
 		name        string
 		reason      genai.FinishReason
 		wantBlocked bool
+		wantErr     error
 	}{
-		{"ゼロ値", "", false},
-		{"FINISH_REASON_UNSPECIFIED", genai.FinishReasonUnspecified, false},
-		{"STOP", genai.FinishReasonStop, false},
-		{"MAX_TOKENS", genai.FinishReasonMaxTokens, true},
-		{"SAFETY", genai.FinishReasonSafety, true},
-		{"RECITATION", genai.FinishReasonRecitation, true},
+		{"ゼロ値", "", false, nil},
+		{"FINISH_REASON_UNSPECIFIED", genai.FinishReasonUnspecified, false, nil},
+		{"STOP", genai.FinishReasonStop, false, nil},
+		// MAX_TOKENS は異常終了だが、対処が違うのでブロックとは別の番兵で返す。
+		{"MAX_TOKENS", genai.FinishReasonMaxTokens, true, ErrTruncated},
+		{"SAFETY", genai.FinishReasonSafety, true, ErrBlocked},
+		{"RECITATION", genai.FinishReasonRecitation, true, ErrBlocked},
 	}
 
 	for _, tt := range tests {
@@ -120,8 +155,11 @@ func TestFinishReasonHasTwoUnsetValues(t *testing.T) {
 
 			_, err := extractText(respWithParts(tt.reason, &genai.Part{Text: "本文"}))
 			if tt.wantBlocked {
-				if !errors.Is(err, ErrBlocked) {
-					t.Errorf("extractText() error = %v, want ErrBlocked", err)
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("extractText() error = %v, want %v", err, tt.wantErr)
+				}
+				if tt.wantErr == ErrTruncated && errors.Is(err, ErrBlocked) {
+					t.Errorf("MAX_TOKENS must not also classify as ErrBlocked: %v", err)
 				}
 				return
 			}
