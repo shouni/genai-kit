@@ -93,6 +93,7 @@ func TestGenerateLyricsErrorBranches(t *testing.T) {
 		prompts     *stubTextPrompts
 		ai          *fakeGenerator
 		wantErr     error
+		wantAlsoErr error
 		wantMessage string
 	}{
 		{
@@ -119,14 +120,15 @@ func TestGenerateLyricsErrorBranches(t *testing.T) {
 			prompts:     &stubTextPrompts{lyricsPrompt: "p"},
 			ai:          textResponder("   "),
 			wantErr:     ErrInvalidResponse,
-			wantMessage: "AI returned an empty string",
+			wantAlsoErr: gemini.ErrEmptyResponse,
 		},
 		{
 			name:        "JSON として解釈できない",
 			prompts:     &stubTextPrompts{lyricsPrompt: "p"},
 			ai:          textResponder("これは JSON ではありません"),
 			wantErr:     ErrInvalidResponse,
-			wantMessage: "failed to unmarshal lyrics json",
+			wantAlsoErr: gemini.ErrInvalidJSON,
+			wantMessage: "これは JSON ではありません", // 抜粋が残る
 		},
 		{
 			// スキーマは満たすが本文が空。再試行しても解決しない可能性が高い失敗です。
@@ -146,6 +148,9 @@ func TestGenerateLyricsErrorBranches(t *testing.T) {
 			require.Error(t, err)
 			if tt.wantErr != nil {
 				assert.ErrorIs(t, err, tt.wantErr)
+			}
+			if tt.wantAlsoErr != nil {
+				assert.ErrorIs(t, err, tt.wantAlsoErr, "gemini 側の番兵も鎖に残ること")
 			}
 			if tt.wantMessage != "" {
 				assert.Contains(t, err.Error(), tt.wantMessage)
@@ -250,6 +255,7 @@ func TestComposeErrorBranches(t *testing.T) {
 		prompts     *stubTextPrompts
 		ai          *fakeGenerator
 		wantErr     error
+		wantAlsoErr error
 		wantMessage string
 	}{
 		{
@@ -276,7 +282,7 @@ func TestComposeErrorBranches(t *testing.T) {
 			prompts:     &stubTextPrompts{recipePrompt: "p"},
 			ai:          textResponder(""),
 			wantErr:     ErrInvalidResponse,
-			wantMessage: "AI returned an empty string",
+			wantAlsoErr: gemini.ErrEmptyResponse,
 		},
 	}
 
@@ -289,6 +295,9 @@ func TestComposeErrorBranches(t *testing.T) {
 			require.Error(t, err)
 			if tt.wantErr != nil {
 				assert.ErrorIs(t, err, tt.wantErr)
+			}
+			if tt.wantAlsoErr != nil {
+				assert.ErrorIs(t, err, tt.wantAlsoErr, "gemini 側の番兵も鎖に残ること")
 			}
 			if tt.wantMessage != "" {
 				assert.Contains(t, err.Error(), tt.wantMessage)

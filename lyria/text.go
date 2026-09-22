@@ -2,7 +2,6 @@ package lyria
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -76,17 +75,11 @@ func (g *textGenerator) generateJSON[T any](ctx context.Context, kind, model, pr
 			return nil, fmt.Errorf("%w: %s response is nil", ErrInvalidResponse, kind)
 		}
 
-		raw := strings.TrimSpace(resp.Text)
-		if raw == "" {
-			return nil, fmt.Errorf("%w: AI returned an empty string for the %s", ErrInvalidResponse, kind)
-		}
-
-		jsonStr := gemini.CleanJSONResponse(raw)
-		var out T
-		if err := json.Unmarshal([]byte(jsonStr), &out); err != nil {
-			// 生出力の全文はログを肥大化させるため、診断に足りる先頭だけを残す。
-			return nil, fmt.Errorf("%w: failed to unmarshal %s json: %w (raw: %s)",
-				ErrInvalidResponse, kind, err, truncateForError(jsonStr))
+		// 空判定・補修・デコード・抜粋は gemini.DecodeJSON が持つ。ここでは
+		// このパッケージの番兵（ErrInvalidResponse）を鎖に足すだけ。
+		out, err := gemini.DecodeJSON[T](resp.Text)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s: %w", ErrInvalidResponse, kind, err)
 		}
 		return &out, nil
 	})
