@@ -89,13 +89,17 @@ func candidateParts(candidate *genai.Candidate) []*genai.Part {
 func extractText(resp *genai.GenerateContentResponse) (string, error) {
 	candidate := firstCandidate(resp)
 	if candidate == nil {
+		// 候補が無いのは、入力が弾かれた（PromptFeedback あり）か、本当に空かのどちらか。
+		if resp != nil && isPromptBlocked(resp.PromptFeedback) {
+			return "", newPromptBlockedError(resp.PromptFeedback)
+		}
 		return "", newEmptyResponseError()
 	}
 
-	// FinishReason が正常（未設定 または STOP）以外の場合は、ブロックされたとみなします。
+	// FinishReason が正常（未設定 または STOP）以外の場合は、途中で止められたとみなします。
 	// 未設定の判定は isUnsetFinishReason に集約しています（ゼロ値と SDK 定数が別値のため）。
 	if isBlockedFinishReason(candidate.FinishReason) {
-		return "", newBlockedError(candidate.FinishReason)
+		return "", newFinishReasonError(candidate.FinishReason)
 	}
 
 	// すべてのテキストパートを連結して返します。

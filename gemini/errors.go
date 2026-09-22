@@ -43,10 +43,17 @@ var ErrVideoGenerationFailed = errors.New("gemini: video generation failed")
 var (
 	// ErrBlocked は、安全フィルタ等により生成がブロックされたことを示します。
 	// プロンプトを変えない限り再試行しても同じ結果になります。
-	// 詳細な理由は errors.AsType[*APIResponseError] で FinishReason を参照してください。
+	// 詳細な理由は errors.AsType[*APIResponseError] で参照してください。入力そのものが
+	// 弾かれた場合は BlockReason に、生成の途中で止められた場合は FinishReason に入ります。
 	ErrBlocked = errors.New("gemini: generation blocked")
 
-	// ErrEmptyResponse は、候補が 1 件も含まれないレスポンスが返されたことを示します。
+	// ErrTruncated は、出力トークンの上限（MAX_TOKENS）で生成が打ち切られたことを示します。
+	// ブロックとは対処が違います。プロンプトではなく MaxOutputTokens を上げるか、
+	// 出力を短くする指示を足します。返った本文は途中までなので、そのまま使えません。
+	ErrTruncated = errors.New("gemini: generation truncated")
+
+	// ErrEmptyResponse は、候補が 1 件も含まれず、入力がブロックされたわけでもない
+	// レスポンスが返されたことを示します（DecodeJSON では本文が空のときも）。
 	ErrEmptyResponse = errors.New("gemini: empty response")
 )
 
@@ -62,11 +69,14 @@ var (
 //	    slog.Warn("blocked", "reason", apiErr.FinishReason)
 //	}
 type APIResponseError struct {
-	// Reason は分類用のセンチネル（ErrBlocked または ErrEmptyResponse）です。
+	// Reason は分類用のセンチネル（ErrBlocked / ErrTruncated / ErrEmptyResponse）です。
 	Reason error
-	// FinishReason は、ブロック時にモデルが返した終了理由です。
-	// 空レスポンスなど終了理由が無い場合はゼロ値（空文字列）になります。
+	// FinishReason は、生成の途中で止められたときにモデルが返した終了理由です。
+	// 入力がブロックされた場合や空レスポンスでは、ゼロ値（空文字列）になります。
 	FinishReason genai.FinishReason
+	// BlockReason は、入力（プロンプト）そのものが弾かれたときの理由です。
+	// この場合は候補が 1 件も返らず、FinishReason はゼロ値です。
+	BlockReason genai.BlockedReason
 	// Message は人間向けの説明です。
 	Message string
 }
@@ -98,17 +108,48 @@ func isUnsetFinishReason(r genai.FinishReason) bool {
 }
 
 // isBlockedFinishReason は、終了理由が異常終了（ブロック等）を示すかを判定します。
+// MAX_TOKENS もここでは真です。分類の切り分けは newFinishReasonError が行います。
 func isBlockedFinishReason(r genai.FinishReason) bool {
 	return !isUnsetFinishReason(r) && r != genai.FinishReasonStop
 }
 
-// newBlockedError は FinishReason 付きのブロックエラーを生成します。
-func newBlockedError(reason genai.FinishReason) *APIResponseError {
+// newFinishReasonError は、異常な終了理由をエラーに分類します。
+//
+// MAX_TOKENS だけは ErrTruncated です。安全フィルタと同じ「ブロック」に混ぜると、
+// 対処（プロンプトを直す / 出力上限を上げる）が違うのに通知の見出しが同じになります。
+func newFinishReasonError(reason genai.FinishReason) *APIResponseError {
+	if reason == genai.FinishReasonMaxTokens {
+		return &APIResponseError{
+			Reason:       ErrTruncated,
+			FinishReason: reason,
+			Message:      "生成が出力トークンの上限で打ち切られました（理由: MAX_TOKENS）",
+		}
+	}
 	return &APIResponseError{
 		Reason:       ErrBlocked,
 		FinishReason: reason,
 		Message:      fmt.Sprintf("生成がブロックされました（理由: %v）", reason),
 	}
+}
+
+// newPromptBlockedError は、入力そのものが弾かれたときのエラーを生成します。
+// 候補が 0 件で PromptFeedback.BlockReason が付いている形で、これを見ないと
+// 「空のレスポンス」として理由なしに報告され、再試行しても無駄なことが伝わりません。
+func newPromptBlockedError(feedback *genai.GenerateContentResponsePromptFeedback) *APIResponseError {
+	msg := fmt.Sprintf("入力がブロックされました（理由: %v）", feedback.BlockReason)
+	if feedback.BlockReasonMessage != "" {
+		msg += ": " + feedback.BlockReasonMessage
+	}
+	return &APIResponseError{
+		Reason:      ErrBlocked,
+		BlockReason: feedback.BlockReason,
+		Message:     msg,
+	}
+}
+
+// isPromptBlocked は、入力がブロックされたことを PromptFeedback が示しているかを返します。
+func isPromptBlocked(feedback *genai.GenerateContentResponsePromptFeedback) bool {
+	return feedback != nil && feedback.BlockReason != "" && feedback.BlockReason != genai.BlockedReasonUnspecified
 }
 
 // newEmptyResponseError は空レスポンスエラーを生成します。

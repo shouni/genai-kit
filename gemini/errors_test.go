@@ -55,7 +55,7 @@ func TestAPIResponseErrorMessage(t *testing.T) {
 // 公開のエラー契約はこの形で使われる前提です。
 func TestAPIResponseErrorUnwrap(t *testing.T) {
 	t.Run("Reason で分類できること", func(t *testing.T) {
-		err := newBlockedError(genai.FinishReasonRecitation)
+		err := newFinishReasonError(genai.FinishReasonRecitation)
 
 		if !errors.Is(err, ErrBlocked) {
 			t.Error("ErrBlocked に一致しません")
