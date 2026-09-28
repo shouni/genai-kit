@@ -3,7 +3,7 @@ module github.com/shouni/genai-kit
 go 1.27
 
 require (
-	cloud.google.com/go/auth v0.23.3
+	cloud.google.com/go/auth v0.24.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/sync v0.23.0
 	golang.org/x/time v0.16.0
