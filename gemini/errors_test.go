@@ -92,11 +92,12 @@ func TestAPIResponseErrorUnwrap(t *testing.T) {
 
 func TestIsUnsetFinishReason(t *testing.T) {
 	tests := map[genai.FinishReason]bool{
-		"":                            true,
-		genai.FinishReasonUnspecified: true,
-		genai.FinishReasonStop:        false,
-		genai.FinishReasonSafety:      false,
-		genai.FinishReasonMaxTokens:   false,
+		"":                             true,
+		genai.FinishReasonUnspecified:  true,
+		genai.FinishReasonStop:         false,
+		genai.FinishReasonSafety:       false,
+		genai.FinishReasonMaxTokens:    false,
+		genai.FinishReasonContinuation: false,
 	}
 
 	for reason, want := range tests {
