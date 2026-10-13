@@ -47,7 +47,8 @@ var (
 	// 弾かれた場合は BlockReason に、生成の途中で止められた場合は FinishReason に入ります。
 	ErrBlocked = errors.New("gemini: generation blocked")
 
-	// ErrTruncated は、出力トークンの上限（MAX_TOKENS）で生成が打ち切られたことを示します。
+	// ErrTruncated は、出力トークンの上限（MAX_TOKENS）で生成が打ち切られたか、
+	// 継続トークン付きの途中結果（CONTINUATION）のまま返されたことを示します。
 	// ブロックとは対処が違います。プロンプトではなく MaxOutputTokens を上げるか、
 	// 出力を短くする指示を足します。返った本文は途中までなので、そのまま使えません。
 	ErrTruncated = errors.New("gemini: generation truncated")
@@ -108,21 +109,31 @@ func isUnsetFinishReason(r genai.FinishReason) bool {
 }
 
 // isBlockedFinishReason は、終了理由が異常終了（ブロック等）を示すかを判定します。
-// MAX_TOKENS もここでは真です。分類の切り分けは newFinishReasonError が行います。
+// MAX_TOKENS と CONTINUATION もここでは真です。分類の切り分けは newFinishReasonError が行います。
 func isBlockedFinishReason(r genai.FinishReason) bool {
 	return !isUnsetFinishReason(r) && r != genai.FinishReasonStop
 }
 
 // newFinishReasonError は、異常な終了理由をエラーに分類します。
 //
-// MAX_TOKENS だけは ErrTruncated です。安全フィルタと同じ「ブロック」に混ぜると、
+// MAX_TOKENS と CONTINUATION は ErrTruncated です。安全フィルタと同じ「ブロック」に混ぜると、
 // 対処（プロンプトを直す / 出力上限を上げる）が違うのに通知の見出しが同じになります。
+// CONTINUATION は genai v1.74.0 以降 SDK が自動継続で消化するため、ここに届くのは
+// AutomaticContinuation を切った場合か、継続後も途中結果が残った場合だけです。
+// どちらも本文は途中までで、ブロックではありません。
 func newFinishReasonError(reason genai.FinishReason) *APIResponseError {
-	if reason == genai.FinishReasonMaxTokens {
+	switch reason {
+	case genai.FinishReasonMaxTokens:
 		return &APIResponseError{
 			Reason:       ErrTruncated,
 			FinishReason: reason,
 			Message:      "生成が出力トークンの上限で打ち切られました（理由: MAX_TOKENS）",
+		}
+	case genai.FinishReasonContinuation:
+		return &APIResponseError{
+			Reason:       ErrTruncated,
+			FinishReason: reason,
+			Message:      "生成が継続待ちの途中結果のまま返されました（理由: CONTINUATION）",
 		}
 	}
 	return &APIResponseError{

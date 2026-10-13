@@ -143,6 +143,8 @@ func TestFinishReasonHasTwoUnsetValues(t *testing.T) {
 		{"STOP", genai.FinishReasonStop, false, nil},
 		// MAX_TOKENS は異常終了だが、対処が違うのでブロックとは別の番兵で返す。
 		{"MAX_TOKENS", genai.FinishReasonMaxTokens, true, ErrTruncated},
+		// CONTINUATION は途中結果。自動継続を切ったときに届き、本文が途中までなのは MAX_TOKENS と同じ。
+		{"CONTINUATION", genai.FinishReasonContinuation, true, ErrTruncated},
 		{"SAFETY", genai.FinishReasonSafety, true, ErrBlocked},
 		{"RECITATION", genai.FinishReasonRecitation, true, ErrBlocked},
 	}
@@ -159,7 +161,7 @@ func TestFinishReasonHasTwoUnsetValues(t *testing.T) {
 					t.Errorf("extractText() error = %v, want %v", err, tt.wantErr)
 				}
 				if tt.wantErr == ErrTruncated && errors.Is(err, ErrBlocked) {
-					t.Errorf("MAX_TOKENS must not also classify as ErrBlocked: %v", err)
+					t.Errorf("%s must not also classify as ErrBlocked: %v", tt.reason, err)
 				}
 				return
 			}
