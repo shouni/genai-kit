@@ -90,6 +90,32 @@ func TestExtractText(t *testing.T) {
 		}
 	})
 
+	// genai v1.75.0 以降、自動継続の途中の回が弾かれると、SDK は前の回の候補から
+	// CONTINUATION を消し、PromptFeedback だけを残して統合します。候補があっても
+	// PromptFeedback を見ないと、途中までの本文が成功として返ってしまう。
+	t.Run("継続途中のブロックは部分テキストを返さず ErrBlocked になること", func(t *testing.T) {
+		resp := &genai.GenerateContentResponse{
+			Candidates: []*genai.Candidate{{
+				Content: &genai.Content{Parts: []*genai.Part{{Text: "途中までの本文"}}},
+			}},
+			PromptFeedback: &genai.GenerateContentResponsePromptFeedback{
+				BlockReason:        genai.BlockedReasonOther,
+				BlockReasonMessage: "Blocked on continuation hop",
+			},
+		}
+		text, err := extractText(resp)
+		if !errors.Is(err, ErrBlocked) {
+			t.Fatalf("extractText() error = %v, want ErrBlocked", err)
+		}
+		if text != "" {
+			t.Errorf("extractText() text = %q, want empty", text)
+		}
+		apiErr, ok := errors.AsType[*APIResponseError](err)
+		if !ok || apiErr.BlockReason != genai.BlockedReasonOther {
+			t.Errorf("BlockReason not carried: %+v", err)
+		}
+	})
+
 	t.Run("理由の無い PromptFeedback は空レスポンスのまま", func(t *testing.T) {
 		resp := &genai.GenerateContentResponse{PromptFeedback: &genai.GenerateContentResponsePromptFeedback{}}
 		if _, err := extractText(resp); !errors.Is(err, ErrEmptyResponse) {
