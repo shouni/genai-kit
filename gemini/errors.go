@@ -121,6 +121,8 @@ func isBlockedFinishReason(r genai.FinishReason) bool {
 // CONTINUATION は genai v1.74.0 以降 SDK が自動継続で消化するため、ここに届くのは
 // AutomaticContinuation を切った場合か、継続後も途中結果が残った場合だけです。
 // どちらも本文は途中までで、ブロックではありません。
+// 継続の途中の回が弾かれた場合は SDK が CONTINUATION を消すので、ここではなく
+// extractText の PromptFeedback 判定で ErrBlocked になります。
 func newFinishReasonError(reason genai.FinishReason) *APIResponseError {
 	switch reason {
 	case genai.FinishReasonMaxTokens:

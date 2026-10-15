@@ -87,12 +87,16 @@ func candidateParts(candidate *genai.Candidate) []*genai.Part {
 
 // extractText は resp からテキストを抽出します。
 func extractText(resp *genai.GenerateContentResponse) (string, error) {
+	// 入力のブロックは候補の有無より先に見ます。通常は候補 0 件で届きますが、
+	// 自動継続の途中の回が弾かれると、SDK（genai v1.75.0 以降）は前の回の候補から
+	// CONTINUATION を消して PromptFeedback だけを残すため、候補を先に見ると
+	// 途中までの本文が正常終了として返ってしまいます。
+	if resp != nil && isPromptBlocked(resp.PromptFeedback) {
+		return "", newPromptBlockedError(resp.PromptFeedback)
+	}
+
 	candidate := firstCandidate(resp)
 	if candidate == nil {
-		// 候補が無いのは、入力が弾かれた（PromptFeedback あり）か、本当に空かのどちらか。
-		if resp != nil && isPromptBlocked(resp.PromptFeedback) {
-			return "", newPromptBlockedError(resp.PromptFeedback)
-		}
 		return "", newEmptyResponseError()
 	}
 
