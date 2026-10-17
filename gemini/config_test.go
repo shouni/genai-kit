@@ -283,3 +283,13 @@ func TestToClientConfigAttachesCredentialsToSuppliedHTTPClient(t *testing.T) {
 		t.Error("HTTPClient が呼び出し側のインスタンスそのものです。複製すべきです")
 	}
 }
+
+// 402 のような課金のエラーは経路で原因が違うため、エラー文の経路名を取り違えないこと。
+func TestConfigBackendName(t *testing.T) {
+	if got := (Config{APIKey: "k"}).backendName(); got != "Gemini API" {
+		t.Errorf("APIKey: got %q, want Gemini API", got)
+	}
+	if got := (Config{ProjectID: "p", LocationID: "l"}).backendName(); got != "Vertex AI" {
+		t.Errorf("Vertex: got %q, want Vertex AI", got)
+	}
+}

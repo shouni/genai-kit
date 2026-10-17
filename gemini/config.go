@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"google.golang.org/genai"
+	"google.golang.org/genai/interactions/retry"
 )
 
 var (
@@ -181,6 +182,41 @@ func (c Config) retryOptions() *genai.HTTPRetryOptions {
 		// 生成が同じ 429 で弾かれたとき散らすのはジッタだけなので（callguard の
 		// 発射間隔はリトライに掛からない）、間隔に比例した幅を持たせます。
 		Jitter: new(initialDelay.Seconds() / 2),
+	}
+}
+
+// backendName は、この設定で接続する経路の名前を返します。
+func (c Config) backendName() string {
+	if c.APIKey != "" {
+		return "Gemini API"
+	}
+	return "Vertex AI"
+}
+
+// interactionRetryConfig は、retryOptions と同じ方針を Interactions のリトライ設定へ写します。
+//
+// genai の Interactions クライアントは HTTPRetryOptions を読まず、指定しなければ独自の既定
+// （4 回、500ms〜8 秒）で再送します。Config の MaxRetries・DisableRetry が片方の経路にしか
+// 効かない状態を避けるため、ここで揃えます。DisableRetry では nil ではなく "none" を返します。
+// nil は「既定を使う」の意味になるためです。
+func (c Config) interactionRetryConfig() *retry.Config {
+	if c.DisableRetry {
+		return &retry.Config{Strategy: "none"}
+	}
+
+	maxRetries := c.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = DefaultMaxRetries
+	}
+	return &retry.Config{
+		Strategy: "attempt-count-backoff",
+		Backoff: &retry.BackoffStrategy{
+			InitialInterval: int(orDefault(c.InitialDelay, DefaultInitialDelay).Milliseconds()),
+			MaxInterval:     int(orDefault(c.MaxDelay, DefaultMaxDelay).Milliseconds()),
+			Exponent:        2,
+		},
+		RetryConnectionErrors: true,
+		MaxRetries:            new(int(maxRetries)),
 	}
 }
 
