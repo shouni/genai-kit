@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"google.golang.org/genai"
+	"google.golang.org/genai/interactions/models/operations"
 )
 
 type modelClient interface {
@@ -16,6 +17,12 @@ type modelClient interface {
 type videoClient interface {
 	GenerateVideosFromSource(ctx context.Context, model string, source *genai.GenerateVideosSource, config *genai.GenerateVideosConfig) (*genai.GenerateVideosOperation, error)
 	GetVideosOperation(ctx context.Context, operation *genai.GenerateVideosOperation, config *genai.GetOperationConfig) (*genai.GenerateVideosOperation, error)
+}
+
+// interactionClient は Interactions API の呼び出し面です。genai の *interactions.Interactions が
+// そのまま満たします。
+type interactionClient interface {
+	Create(ctx context.Context, request operations.CreateInteractionRequest, opts ...operations.Option) (*operations.CreateInteractionResponse, error)
 }
 
 type genAIModelClient struct {

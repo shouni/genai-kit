@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"google.golang.org/genai"
+	"google.golang.org/genai/interactions/retry"
 )
 
 // Client がパッケージ公開インターフェースを満たすことをコンパイル時に保証します。
@@ -30,9 +31,16 @@ var (
 
 // Client は Gemini SDK をラップしたメイン構造体です。
 type Client struct {
-	modelClient    modelClient
-	videoClient    videoClient
-	requestTimeout time.Duration
+	modelClient       modelClient
+	videoClient       videoClient
+	interactionClient interactionClient
+	// interactionRetries は Interactions の呼び出しに渡すリトライ設定です。
+	// Interactions は genai の HTTPRetryOptions を読まないため、Config から別に組み立てます。
+	interactionRetries *retry.Config
+	requestTimeout     time.Duration
+	// backendName はエラー文に載せる経路名です（"Vertex AI" / "Gemini API"）。
+	// 402 のような課金のエラーは経路で原因が違うため、取り違えないように書き分けます。
+	backendName string
 }
 
 // New は提供された設定に基づいて、新しいクライアントを作成します。
@@ -52,17 +60,34 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	}
 
 	return &Client{
-		modelClient:    genAIModelClient{models: client.Models},
-		videoClient:    genAIVideoClient{models: client.Models, operations: client.Operations},
-		requestTimeout: cfg.RequestTimeout,
+		modelClient:        genAIModelClient{models: client.Models},
+		videoClient:        genAIVideoClient{models: client.Models, operations: client.Operations},
+		interactionClient:  client.Interactions,
+		interactionRetries: cfg.interactionRetryConfig(),
+		requestTimeout:     cfg.RequestTimeout,
+		backendName:        cfg.backendName(),
 	}, nil
 }
 
 // requestContext は Config.RequestTimeout を適用した context を返します。
 // 未設定（0）の場合は呼び出し元の context をそのまま使います。
 func (c *Client) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if c.requestTimeout <= 0 {
+	return withRequestTimeout(ctx, c.requestTimeout)
+}
+
+// backend はエラー文に載せる経路名を返します。New を通らずに組み立てた Client（テスト）でも
+// 文が崩れないよう、未設定なら既定の Vertex AI とします。
+func (c *Client) backend() string {
+	if c.backendName == "" {
+		return "Vertex AI"
+	}
+	return c.backendName
+}
+
+// withRequestTimeout は timeout が正の値のときだけ期限を付けた context を返します。
+func withRequestTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
 		return ctx, func() {}
 	}
-	return context.WithTimeout(ctx, c.requestTimeout)
+	return context.WithTimeout(ctx, timeout)
 }

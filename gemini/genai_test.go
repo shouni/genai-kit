@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"google.golang.org/genai"
+	"google.golang.org/genai/interactions/models/operations"
 )
 
 // SDK との境界（modelClient / videoClient）に差し込むテストダブルです。
@@ -16,7 +17,29 @@ var (
 	_ modelClient = (*fakeModelClient)(nil)
 	_ modelClient = (*slowModelClient)(nil)
 	_ videoClient = (*fakeVideoClient)(nil)
+
+	_ interactionClient = (*fakeInteractionClient)(nil)
 )
+
+// fakeInteractionClient は Interactions 呼び出しのテストダブルで、送られたリクエストを記録します。
+type fakeInteractionClient struct {
+	calls   int
+	gotReq  operations.CreateInteractionRequest
+	gotOpts []operations.Option
+
+	resp *operations.CreateInteractionResponse
+	err  error
+}
+
+func (f *fakeInteractionClient) Create(_ context.Context, request operations.CreateInteractionRequest, opts ...operations.Option) (*operations.CreateInteractionResponse, error) {
+	f.calls++
+	f.gotReq = request
+	f.gotOpts = opts
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
+}
 
 // fakeModelClient は生成呼び出しのテストダブルで、SDK へ渡された引数を記録します。
 type fakeModelClient struct {

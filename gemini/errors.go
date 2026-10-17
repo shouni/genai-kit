@@ -31,6 +31,10 @@ var (
 	// ErrInvalidVideoInput は、動画生成の入力の組み合わせが API の受け付けない
 	// ものだった場合に返されます（Image と Video の併用など）。
 	ErrInvalidVideoInput = errors.New("gemini: invalid video generation input")
+	// ErrUnsupportedOption は、InteractionsGenerator が Interactions へ写せない
+	// GenerateOptions を受け取った場合に返されます。黙って落とすと、指定したつもりの
+	// 設定が効かないまま生成が課金されるため、送る前に止めます。
+	ErrUnsupportedOption = errors.New("gemini: option not supported by interactions")
 )
 
 // ErrVideoGenerationFailed は、動画生成のオペレーションが失敗として完了したことを

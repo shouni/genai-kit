@@ -181,7 +181,7 @@ func (c *Client) generate(ctx context.Context, model string, contents []*genai.C
 
 	resp, err := c.modelClient.GenerateContent(ctx, model, contents, config)
 	if err != nil {
-		return nil, fmt.Errorf("モデル %s の Vertex AI 呼び出しに失敗しました: %w", model, err)
+		return nil, fmt.Errorf("モデル %s の %s 呼び出しに失敗しました: %w", model, c.backend(), err)
 	}
 	return responseFromGenAI(resp)
 }

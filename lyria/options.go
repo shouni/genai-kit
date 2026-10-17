@@ -35,8 +35,13 @@ func WithLyriaModel(value string) Option {
 // WithAudioGenerator は、音声生成（Lyria）にだけ使う生成クライアントを差し替えます。
 // 未指定なら New に渡した aiClient を作詞・作曲と共用します。
 //
-// genai SDK が Lyria の出力フォーマットを指定できるようになるまでの間、音声だけを
-// REST 直叩きの実装へ逃がすための口です。差し替え点をここ（gemini.Generator）に置くのは、
+// generateContent では Lyria の出力形式を選べないため、音声だけを Interactions の経路へ
+// 逃がすための口です。WAV が欲しい場合は gemini.Client.Interactions で作った生成器を
+// 渡します:
+//
+//	lyria.WithAudioGenerator(client.Interactions(gemini.InteractionsConfig{AudioMIMEType: "audio/wav"}))
+//
+// 差し替え点をここ（gemini.Generator）に置くのは、
 // Workflow・Track・呼び出しガード・プロンプト構築をそのまま使い回し、戻すときは
 // このオプションを外すだけにするためです。
 func WithAudioGenerator(g gemini.Generator) Option {
