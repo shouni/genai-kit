@@ -141,6 +141,9 @@ func checkInteractionOptions(opts GenerateOptions) error {
 	if opts.ResponseMIMEType != "" && !strings.HasPrefix(opts.ResponseMIMEType, "audio/") {
 		unsupported = append(unsupported, "ResponseMIMEType="+opts.ResponseMIMEType)
 	}
+	if opts.OutputURIPrefix != "" {
+		unsupported = append(unsupported, "OutputURIPrefix")
+	}
 	if len(unsupported) > 0 {
 		return fmt.Errorf("%w: %s", ErrUnsupportedOption, strings.Join(unsupported, ", "))
 	}

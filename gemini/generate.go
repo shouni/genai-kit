@@ -168,6 +168,14 @@ func buildGenerateConfig(opts GenerateOptions) (*genai.GenerateContentConfig, er
 	}
 	applyImageConfig(genConfig, opts)
 
+	if opts.OutputURIPrefix != "" {
+		// 書き込み先の不備は生成の後ではなく送る前に分かるので、ここで止める。
+		if !strings.HasPrefix(opts.OutputURIPrefix, "gs://") {
+			return nil, fmt.Errorf("%w (入力値: %q)", ErrInvalidOutputURIPrefix, opts.OutputURIPrefix)
+		}
+		genConfig.GenerationOutputConfig = &genai.GenerationOutputConfig{OutputURIPrefix: opts.OutputURIPrefix}
+	}
+
 	return genConfig, nil
 }
 

@@ -190,6 +190,37 @@ func TestBuildGenerateConfigAppliesOptions(t *testing.T) {
 	}
 }
 
+func TestBuildGenerateConfigOutputURIPrefix(t *testing.T) {
+	t.Run("未指定なら送らない", func(t *testing.T) {
+		got, err := buildGenerateConfig(GenerateOptions{})
+		if err != nil {
+			t.Fatalf("buildGenerateConfig() error = %v", err)
+		}
+		if got.GenerationOutputConfig != nil {
+			t.Errorf("GenerationOutputConfig = %+v, want nil", got.GenerationOutputConfig)
+		}
+	})
+
+	t.Run("gs:// は書き込み先として送る", func(t *testing.T) {
+		got, err := buildGenerateConfig(GenerateOptions{OutputURIPrefix: "gs://bucket/prefix/"})
+		if err != nil {
+			t.Fatalf("buildGenerateConfig() error = %v", err)
+		}
+		if got.GenerationOutputConfig == nil || got.GenerationOutputConfig.OutputURIPrefix != "gs://bucket/prefix/" {
+			t.Errorf("GenerationOutputConfig = %+v", got.GenerationOutputConfig)
+		}
+	})
+
+	for _, prefix := range []string{"https://example.com/out/", "bucket/prefix/"} {
+		t.Run("gs:// 以外は送る前に弾く: "+prefix, func(t *testing.T) {
+			_, err := buildGenerateConfig(GenerateOptions{OutputURIPrefix: prefix})
+			if !errors.Is(err, ErrInvalidOutputURIPrefix) {
+				t.Errorf("err = %v, want ErrInvalidOutputURIPrefix", err)
+			}
+		})
+	}
+}
+
 // TestBuildGenerateConfigSamplingParams は、ゼロ値が意味を持つ項目をポインタで
 // 区別できていることを検証します。Temperature 0 は「未設定」ではなく「決定的」です。
 func TestBuildGenerateConfigSamplingParams(t *testing.T) {

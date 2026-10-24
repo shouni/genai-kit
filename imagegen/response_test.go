@@ -43,6 +43,34 @@ func TestToResponseTakesFirstInlineImage(t *testing.T) {
 	assert.Same(t, usage, got.Usage)
 }
 
+// TestToResponseTakesOutputURI は、OutputURIPrefix の指定で GCS に書き込まれた画像を
+// URI として返すことを検証します。サーバーが MIME type を添えなかった場合は、
+// 書き込み先の拡張子から補います。
+func TestToResponseTakesOutputURI(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       gemini.Attachment
+		wantMIME string
+	}{
+		{"サーバーの MIME type をそのまま使う", gemini.Attachment{URI: "gs://b/out/1", MIMEType: "image/webp"}, "image/webp"},
+		{"無ければ拡張子から補う", gemini.Attachment{URI: "gs://b/out/1.png"}, "image/png"},
+		{"拡張子でも分からなければ空のまま", gemini.Attachment{URI: "gs://b/out/1"}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := newPrepared(nil).toResponse(&gemini.Response{
+				Attachments: []gemini.Attachment{tt.in},
+			})
+			require.NoError(t, err)
+
+			assert.Empty(t, got.Data)
+			assert.Equal(t, tt.in.URI, got.URI)
+			assert.Equal(t, tt.wantMIME, got.MIMEType)
+		})
+	}
+}
+
 // TestToResponseReportsMissingImage は、画像が無い応答を区別できるエラーにすることを
 // 検証します。安全フィルタによるブロックは gemini 側でエラーになるため、このパッケージが
 // 区別するのは「画像データが無い」ことだけです。
