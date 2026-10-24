@@ -222,6 +222,7 @@ func TestInteractionsGenerateRejectsBeforeSending(t *testing.T) {
 		{name: "画像設定は写せない", model: "m", prompt: "p", opts: GenerateOptions{AspectRatio: "1:1"}, wantErr: ErrUnsupportedOption},
 		{name: "構造化出力は写せない", model: "m", prompt: "p", opts: GenerateOptions{ResponseJSONSchema: map[string]any{}}, wantErr: ErrUnsupportedOption},
 		{name: "音声以外の MIME type は写せない", model: "m", prompt: "p", opts: GenerateOptions{ResponseMIMEType: "application/json"}, wantErr: ErrUnsupportedOption},
+		{name: "GCS への書き出しは写せない", model: "m", prompt: "p", opts: GenerateOptions{OutputURIPrefix: "gs://bucket/out/"}, wantErr: ErrUnsupportedOption},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

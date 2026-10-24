@@ -11,11 +11,15 @@ type Response struct {
 	Text   string
 	Images [][]byte // 生成画像 (InlineData) を保持します
 	Audios [][]byte // Lyria 3 等の音声データ
-	// Attachments は返却されたインラインデータを MIME type 付きで保持します。
+	// Attachments は返却されたメディアを MIME type 付きで保持します。
 	//
 	// Images / Audios はバイト列だけなので、保存時の拡張子や Content-Type を決める
 	// 必要がある呼び出し側のために、型を保ったまま取り出せる形を用意しています。
 	// 順序は API の返却順です。
+	//
+	// GenerateOptions.OutputURIPrefix を指定した場合、メディアは GCS に書き込まれて
+	// URI だけが返るため、その要素は Data が空で URI が設定されます。Images / Audios は
+	// バイト列を持つ要素だけの部分集合なので、URI の要素は含まれません。
 	Attachments []Attachment
 	// Thoughts は思考サマリです。GenerateOptions.IncludeThoughts が true で、
 	// かつモデルが思考サマリを返した場合にのみ設定されます。
@@ -35,7 +39,10 @@ type TokenUsage struct {
 }
 
 // responseFromGenAI は genai のレスポンスをパッケージ公開型の Response に変換します。
-func responseFromGenAI(resp *genai.GenerateContentResponse) (*Response, error) {
+//
+// outputToGCS は、リクエストで GenerationOutputConfig（OutputURIPrefix）を送ったかどうかです。
+// 送ったときだけ FileData の URI を Attachments に含めます（理由は extractAttachments を参照）。
+func responseFromGenAI(resp *genai.GenerateContentResponse, outputToGCS bool) (*Response, error) {
 	text, err := extractText(resp)
 	if err != nil {
 		return nil, err
@@ -43,11 +50,13 @@ func responseFromGenAI(resp *genai.GenerateContentResponse) (*Response, error) {
 
 	// MIME type で振り分ける。Images / Audios は Attachments の部分集合で、
 	// 型を意識せずバイト列だけ欲しい呼び出し側のための入口です。
-	attachments := extractInlineData(resp)
+	attachments := extractAttachments(resp, outputToGCS)
 	var images [][]byte
 	var audios [][]byte
 	for _, attachment := range attachments {
 		switch {
+		case len(attachment.Data) == 0:
+			// URI で返った要素はバイト列を持たない。
 		case strings.HasPrefix(attachment.MIMEType, "image/"):
 			images = append(images, attachment.Data)
 		case strings.HasPrefix(attachment.MIMEType, "audio/"):
@@ -136,21 +145,36 @@ func extractThoughts(resp *genai.GenerateContentResponse) string {
 	return sb.String()
 }
 
-// extractInlineData は、レスポンスに含まれるインラインデータを MIME type 付きで
+// extractAttachments は、レスポンスに含まれるメディアを MIME type 付きで
 // 返却順のまま取り出します。
+//
+// withFileData が true のときは、インラインデータに加えて FileData も拾います。
+// OutputURIPrefix を指定するとメディアは GCS に書き込まれて FileData の URI だけが
+// 返るため、InlineData しか見ないと生成物を丸ごと取りこぼします。
+//
+// 指定していないときに FileData を拾わないのは、呼び出し側が「Attachments の要素には
+// バイト列がある」前提で読んでいるためです。想定外の FileData が Data の空な要素として
+// 混ざると、以前はデータ無しのエラーになった応答が、空のバイト列の成功として通ります
+// （imagegen は空の画像を、lyria は空の Track を返し、保存側は空ファイルを書きます）。
 //
 // nil のパートを読み飛ばすのは extractText / extractThoughts と同じ理由です。
 // パートはサーバーから来るものなので、こちら側の検証で nil を排除できません。
-func extractInlineData(resp *genai.GenerateContentResponse) []Attachment {
+func extractAttachments(resp *genai.GenerateContentResponse, withFileData bool) []Attachment {
 	var attachments []Attachment
 	for _, part := range candidateParts(firstCandidate(resp)) {
-		if part == nil || part.InlineData == nil {
-			continue
+		switch {
+		case part == nil:
+		case part.InlineData != nil:
+			attachments = append(attachments, Attachment{
+				MIMEType: part.InlineData.MIMEType,
+				Data:     part.InlineData.Data,
+			})
+		case withFileData && part.FileData != nil && part.FileData.FileURI != "":
+			attachments = append(attachments, Attachment{
+				MIMEType: part.FileData.MIMEType,
+				URI:      part.FileData.FileURI,
+			})
 		}
-		attachments = append(attachments, Attachment{
-			MIMEType: part.InlineData.MIMEType,
-			Data:     part.InlineData.Data,
-		})
 	}
 	return attachments
 }

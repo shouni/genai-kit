@@ -8,7 +8,12 @@ import (
 
 // Response は生成された画像データとそのメタデータです。
 type Response struct {
-	Data     []byte
+	// Data は生成画像のバイト列です。OutputURIPrefix を指定した場合は空で、URI に
+	// 書き込み先が入ります。
+	Data []byte
+	// URI は、OutputURIPrefix を指定したときに API が画像を書き込んだ gs:// URI です。
+	// 指定しなければ空で、Data に画像が入ります。
+	URI      string
 	MIMEType string
 	// UsedSeed はリクエストで指定した（または自動採番された）シードです。
 	// API はレスポンスにシードを返さないため、これは送信値の記録です。
@@ -35,12 +40,19 @@ func (p preparedRequest) toResponse(resp *gemini.Response) (*Response, error) {
 	// gemini.Response.Attachments は MIME type 込みで返るため、保存時の Content-Type を
 	// 決めるために生の SDK レスポンスを辿る必要はありません。
 	for _, attachment := range resp.Attachments {
-		if len(attachment.Data) == 0 {
+		if attachment.IsEmpty() {
 			continue
+		}
+		mimeType := attachment.MIMEType
+		if mimeType == "" && attachment.URI != "" {
+			// サーバーが型を添えなかった場合だけ、書き込み先の拡張子から補う。
+			// 分からなければ空のまま返す（理由は mimeTypeByPath を参照）。
+			mimeType = mimeTypeByPath(attachment.URI)
 		}
 		return &Response{
 			Data:     attachment.Data,
-			MIMEType: attachment.MIMEType,
+			URI:      attachment.URI,
+			MIMEType: mimeType,
 			UsedSeed: seedOrZero(p.opts.Seed),
 			Model:    p.model,
 			Prompt:   p.prompt,
@@ -48,5 +60,5 @@ func (p preparedRequest) toResponse(resp *gemini.Response) (*Response, error) {
 		}, nil
 	}
 
-	return nil, fmt.Errorf("%w: response contains no inline image", ErrNoImageData)
+	return nil, fmt.Errorf("%w: response contains no image", ErrNoImageData)
 }

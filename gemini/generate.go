@@ -168,6 +168,14 @@ func buildGenerateConfig(opts GenerateOptions) (*genai.GenerateContentConfig, er
 	}
 	applyImageConfig(genConfig, opts)
 
+	if opts.OutputURIPrefix != "" {
+		// 書き込み先の不備は生成の後ではなく送る前に分かるので、ここで止める。
+		if !strings.HasPrefix(opts.OutputURIPrefix, "gs://") {
+			return nil, fmt.Errorf("%w (入力値: %q)", ErrInvalidOutputURIPrefix, opts.OutputURIPrefix)
+		}
+		genConfig.GenerationOutputConfig = &genai.GenerationOutputConfig{OutputURIPrefix: opts.OutputURIPrefix}
+	}
+
 	return genConfig, nil
 }
 
@@ -183,7 +191,7 @@ func (c *Client) generate(ctx context.Context, model string, contents []*genai.C
 	if err != nil {
 		return nil, fmt.Errorf("モデル %s の %s 呼び出しに失敗しました: %w", model, c.backend(), err)
 	}
-	return responseFromGenAI(resp)
+	return responseFromGenAI(resp, config.GenerationOutputConfig != nil)
 }
 
 // seedToPtrInt32 は *int64 を SDK 用の *int32 に変換します。

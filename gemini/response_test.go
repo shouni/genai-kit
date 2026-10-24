@@ -233,7 +233,7 @@ func TestResponseAttachmentsCarryMIMETypes(t *testing.T) {
 	resp, err := responseFromGenAI(respWithParts(genai.FinishReasonStop,
 		&genai.Part{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("png")}},
 		&genai.Part{InlineData: &genai.Blob{MIMEType: "audio/mpeg", Data: []byte("mp3")}},
-	))
+	), false)
 	if err != nil {
 		t.Fatalf("responseFromGenAI() error = %v", err)
 	}
@@ -253,6 +253,47 @@ func TestResponseAttachmentsCarryMIMETypes(t *testing.T) {
 	}
 }
 
+// TestResponseAttachmentsCarryOutputURIs は、OutputURIPrefix の指定で GCS に書き込まれた
+// メディアが FileData の URI として Attachments に残ることを検証します。InlineData しか
+// 見ないと、生成物がエラーも無く丸ごと消えます。
+func TestResponseAttachmentsCarryOutputURIs(t *testing.T) {
+	resp, err := responseFromGenAI(respWithParts(genai.FinishReasonStop,
+		&genai.Part{FileData: &genai.FileData{FileURI: "gs://bucket/out/1.png", MIMEType: "image/png"}},
+		&genai.Part{FileData: &genai.FileData{MIMEType: "image/png"}}, // URI の無い FileData は落とす
+		&genai.Part{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("png")}},
+	), true)
+	if err != nil {
+		t.Fatalf("responseFromGenAI() error = %v", err)
+	}
+
+	if len(resp.Attachments) != 2 {
+		t.Fatalf("Attachments = %+v, want 2 件", resp.Attachments)
+	}
+	got := resp.Attachments[0]
+	if got.URI != "gs://bucket/out/1.png" || got.MIMEType != "image/png" || len(got.Data) != 0 {
+		t.Errorf("Attachments[0] = %+v, want URI と MIME type だけ", got)
+	}
+	// Images はバイト列を持つ要素だけを集める。URI の要素で空のバイト列を積まない。
+	if len(resp.Images) != 1 || string(resp.Images[0]) != "png" {
+		t.Errorf("Images = %q, want インラインの 1 件だけ", resp.Images)
+	}
+}
+
+// TestResponseIgnoresFileDataWithoutOutputURIPrefix は、OutputURIPrefix を送っていない
+// リクエストでは FileData を拾わないことを検証します。拾うと、以前はデータ無しのエラーに
+// なった応答が、Data の空な要素として imagegen / lyria を素通りします。
+func TestResponseIgnoresFileDataWithoutOutputURIPrefix(t *testing.T) {
+	resp, err := responseFromGenAI(respWithParts(genai.FinishReasonStop,
+		&genai.Part{FileData: &genai.FileData{FileURI: "gs://bucket/out/1.png", MIMEType: "image/png"}},
+	), false)
+	if err != nil {
+		t.Fatalf("responseFromGenAI() error = %v", err)
+	}
+	if len(resp.Attachments) != 0 {
+		t.Errorf("Attachments = %+v, want 0 件", resp.Attachments)
+	}
+}
+
 // TestResponseFromGenAISkipsNilParts は、レスポンス中の nil パートで panic しないことを
 // 検証します。パートはサーバー由来なので、こちらの入力検証では排除できません。
 func TestResponseFromGenAISkipsNilParts(t *testing.T) {
@@ -262,7 +303,7 @@ func TestResponseFromGenAISkipsNilParts(t *testing.T) {
 		&genai.Part{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("img")}},
 		nil,
 		&genai.Part{InlineData: &genai.Blob{MIMEType: "audio/mpeg", Data: []byte("snd")}},
-	))
+	), false)
 	if err != nil {
 		t.Fatalf("responseFromGenAI() error = %v", err)
 	}
@@ -287,7 +328,7 @@ func TestResponseFromGenAISkipsNilParts(t *testing.T) {
 func TestResponseFromGenAIIgnoresUnknownMIMETypes(t *testing.T) {
 	got, err := responseFromGenAI(respWithParts(genai.FinishReasonStop,
 		&genai.Part{InlineData: &genai.Blob{MIMEType: "application/pdf", Data: []byte("pdf")}},
-	))
+	), false)
 	if err != nil {
 		t.Fatalf("responseFromGenAI() error = %v", err)
 	}

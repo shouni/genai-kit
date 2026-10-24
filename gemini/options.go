@@ -87,6 +87,18 @@ type GenerateOptions struct {
 	// ResponseSchema と ResponseJSONSchema は排他的な指定方法です。
 	// 両方を設定した場合は ResponseJSONSchema を優先し、ResponseSchema は送信しません。
 	ResponseJSONSchema any
+
+	// OutputURIPrefix を設定すると、生成された画像などのメディアを API が GCS へ直接書き込み、
+	// レスポンスにはバイト列の代わりに書き込み先の URI が返ります（Vertex AI のみ）。
+	// "gs://bucket/prefix/" の形で指定し、gs:// 以外は ErrInvalidOutputURIPrefix です。
+	//
+	// 返った URI は Response.Attachments の URI に入り、Data は空です。Images / Audios は
+	// バイト列だけを集めるため、この指定をすると空になります。保存先が GCS なら、バイト列が
+	// レスポンスを往復して呼び出し側がアップロードし直す手間が無くなります。
+	//
+	// API キー経由では SDK が送信前にエラーにし、InteractionsGenerator では
+	// ErrUnsupportedOption です。
+	OutputURIPrefix string
 }
 
 // HasImageConfig は、画像生成特有のパラメータが1つでも設定されているかを判定します。
