@@ -39,7 +39,10 @@ type TokenUsage struct {
 }
 
 // responseFromGenAI は genai のレスポンスをパッケージ公開型の Response に変換します。
-func responseFromGenAI(resp *genai.GenerateContentResponse) (*Response, error) {
+//
+// outputToGCS は、リクエストで GenerationOutputConfig（OutputURIPrefix）を送ったかどうかです。
+// 送ったときだけ FileData の URI を Attachments に含めます（理由は extractAttachments を参照）。
+func responseFromGenAI(resp *genai.GenerateContentResponse, outputToGCS bool) (*Response, error) {
 	text, err := extractText(resp)
 	if err != nil {
 		return nil, err
@@ -47,7 +50,7 @@ func responseFromGenAI(resp *genai.GenerateContentResponse) (*Response, error) {
 
 	// MIME type で振り分ける。Images / Audios は Attachments の部分集合で、
 	// 型を意識せずバイト列だけ欲しい呼び出し側のための入口です。
-	attachments := extractAttachments(resp)
+	attachments := extractAttachments(resp, outputToGCS)
 	var images [][]byte
 	var audios [][]byte
 	for _, attachment := range attachments {
@@ -145,13 +148,18 @@ func extractThoughts(resp *genai.GenerateContentResponse) string {
 // extractAttachments は、レスポンスに含まれるメディアを MIME type 付きで
 // 返却順のまま取り出します。
 //
-// インラインデータに加えて FileData も拾います。OutputURIPrefix を指定すると
-// メディアは GCS に書き込まれて FileData の URI だけが返るため、InlineData しか
-// 見ないと生成物を丸ごと取りこぼします。
+// withFileData が true のときは、インラインデータに加えて FileData も拾います。
+// OutputURIPrefix を指定するとメディアは GCS に書き込まれて FileData の URI だけが
+// 返るため、InlineData しか見ないと生成物を丸ごと取りこぼします。
+//
+// 指定していないときに FileData を拾わないのは、呼び出し側が「Attachments の要素には
+// バイト列がある」前提で読んでいるためです。想定外の FileData が Data の空な要素として
+// 混ざると、以前はデータ無しのエラーになった応答が、空のバイト列の成功として通ります
+// （imagegen は空の画像を、lyria は空の Track を返し、保存側は空ファイルを書きます）。
 //
 // nil のパートを読み飛ばすのは extractText / extractThoughts と同じ理由です。
 // パートはサーバーから来るものなので、こちら側の検証で nil を排除できません。
-func extractAttachments(resp *genai.GenerateContentResponse) []Attachment {
+func extractAttachments(resp *genai.GenerateContentResponse, withFileData bool) []Attachment {
 	var attachments []Attachment
 	for _, part := range candidateParts(firstCandidate(resp)) {
 		switch {
@@ -161,7 +169,7 @@ func extractAttachments(resp *genai.GenerateContentResponse) []Attachment {
 				MIMEType: part.InlineData.MIMEType,
 				Data:     part.InlineData.Data,
 			})
-		case part.FileData != nil && part.FileData.FileURI != "":
+		case withFileData && part.FileData != nil && part.FileData.FileURI != "":
 			attachments = append(attachments, Attachment{
 				MIMEType: part.FileData.MIMEType,
 				URI:      part.FileData.FileURI,

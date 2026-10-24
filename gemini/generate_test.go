@@ -221,6 +221,36 @@ func TestBuildGenerateConfigOutputURIPrefix(t *testing.T) {
 	}
 }
 
+// TestGenerateReadsFileDataOnlyWithOutputURIPrefix は、FileData の URI を返すのが
+// OutputURIPrefix を指定した呼び出しだけであることを、Generate 経由で検証します。
+// 未指定の呼び出しの結果は、この機能が入る前と同じでなければなりません。
+func TestGenerateReadsFileDataOnlyWithOutputURIPrefix(t *testing.T) {
+	tests := []struct {
+		name string
+		opts GenerateOptions
+		want int
+	}{
+		{"未指定なら拾わない", GenerateOptions{}, 0},
+		{"指定すれば拾う", GenerateOptions{OutputURIPrefix: "gs://bucket/out/"}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeModelClient{resp: respWithParts(genai.FinishReasonStop,
+				&genai.Part{FileData: &genai.FileData{FileURI: "gs://bucket/out/1.png", MIMEType: "image/png"}},
+			)}
+			client := &Client{modelClient: fake}
+
+			resp, err := client.Generate(context.Background(), "gemini-test", "draw", nil, tt.opts)
+			if err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			if len(resp.Attachments) != tt.want {
+				t.Errorf("Attachments = %+v, want %d 件", resp.Attachments, tt.want)
+			}
+		})
+	}
+}
+
 // TestBuildGenerateConfigSamplingParams は、ゼロ値が意味を持つ項目をポインタで
 // 区別できていることを検証します。Temperature 0 は「未設定」ではなく「決定的」です。
 func TestBuildGenerateConfigSamplingParams(t *testing.T) {

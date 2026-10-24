@@ -191,7 +191,7 @@ func (c *Client) generate(ctx context.Context, model string, contents []*genai.C
 	if err != nil {
 		return nil, fmt.Errorf("モデル %s の %s 呼び出しに失敗しました: %w", model, c.backend(), err)
 	}
-	return responseFromGenAI(resp)
+	return responseFromGenAI(resp, config.GenerationOutputConfig != nil)
 }
 
 // seedToPtrInt32 は *int64 を SDK 用の *int32 に変換します。
