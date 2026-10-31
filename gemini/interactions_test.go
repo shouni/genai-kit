@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/genai/interactions/models/apierrors"
 	ia "google.golang.org/genai/interactions/models/interactions"
 	"google.golang.org/genai/interactions/models/operations"
 )
@@ -276,6 +277,13 @@ func TestInteractionsGenerateClassifiesFailures(t *testing.T) {
 			wantErr: ErrTruncated,
 		},
 		{
+			// 自動継続（genai v1.77.0 から既定）を通っても続きが残った場合。generateContent の
+			// CONTINUATION と同じく、拒否ではなく打ち切りとして扱う。
+			name:    "出力上限で止まったまま残った",
+			raw:     `{"status": "requires_continuation", "continuation_token": "t"}`,
+			wantErr: ErrTruncated,
+		},
+		{
 			name:        "失敗は API のメッセージを残す",
 			raw:         `{"status": "failed", "errors": [{"code": "x", "message": "vocal likeness"}]}`,
 			wantErr:     ErrEmptyResponse,
@@ -309,6 +317,25 @@ func TestInteractionsGenerateClassifiesFailures(t *testing.T) {
 				t.Errorf("err = %v, want %q を含む", err, tt.wantMessage)
 			}
 		})
+	}
+}
+
+// 自動継続が途中で止まると、SDK は ContinuationInterruptedError を返します。呼び出し側は
+// タイムアウトを errors.Is(err, context.DeadlineExceeded) で見分けるので、原因が鎖に残ることを
+// 確かめます。
+func TestInteractionsGenerateKeepsTheCauseOfAnInterruptedContinuation(t *testing.T) {
+	fake := &fakeInteractionClient{err: &apierrors.ContinuationInterruptedError{
+		Message: "continuation interrupted",
+		Cause:   context.DeadlineExceeded,
+	}}
+	g := newTestInteractions(fake, InteractionsConfig{})
+
+	_, err := g.Generate(context.Background(), "lyria-3.5", "piano", nil, GenerateOptions{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded を含む", err)
+	}
+	if _, ok := errors.AsType[*apierrors.ContinuationInterruptedError](err); !ok {
+		t.Errorf("ContinuationInterruptedError として取り出せません: %v", err)
 	}
 }
 
