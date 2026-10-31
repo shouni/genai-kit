@@ -353,13 +353,18 @@ func decodeInteractionMedia(data, uri, mimeType *string) (Attachment, error) {
 
 // interactionStatusError は、completed 以外で返った interaction をエラーに分類します。
 //
-// incomplete と budget_exceeded は上限で打ち切られた途中結果なので ErrTruncated、それ以外
-// （failed・cancelled・未完了のまま返った in_progress など）は使える出力が無いので
-// ErrEmptyResponse です。
+// incomplete と budget_exceeded と requires_continuation は上限で打ち切られた途中結果なので
+// ErrTruncated、それ以外（failed・cancelled・未完了のまま返った in_progress など）は使える
+// 出力が無いので ErrEmptyResponse です。
+//
+// requires_continuation は 1 リクエストの出力上限で止まった印で、genai v1.77.0 からは SDK が
+// 既定で続きを取り直してつなぐ（自動継続）ため、ここまで届くのは継続しても残った場合だけです。
+// generateContent の CONTINUATION を ErrTruncated にしているのと揃えています。
 func interactionStatusError(it *ia.Interaction) *APIResponseError {
 	reason := ErrEmptyResponse
 	switch it.Status {
-	case ia.InteractionStatusIncomplete, ia.InteractionStatusBudgetExceeded:
+	case ia.InteractionStatusIncomplete, ia.InteractionStatusBudgetExceeded,
+		ia.InteractionStatusRequiresContinuation:
 		reason = ErrTruncated
 	}
 
