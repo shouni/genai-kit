@@ -28,6 +28,12 @@ type AIModels struct {
 	// レシピに載せるのは、プロンプトを組む側に届く情報がレシピだけだからです。recipe.json に
 	// 残るので、作り直しでも同じレシピを両方の表記で走らせられます。
 	LyricReading string `json:"lyric_reading,omitempty"`
+	// AudioTarget は、このレシピの音声をどのモデルで作るつもりかです（AudioTargetLyria /
+	// AudioTargetSuno）。空は AudioTargetLyria 扱いです。
+	//
+	// 構成と歌詞の分量はレシピを作る時点で生成先に合わせて決まるため、作り直しでも同じ前提で
+	// 扱えるようレシピに残します。AudioModel は実際に使ったモデル名で、こちらは設計上の宛先です。
+	AudioTarget string `json:"audio_target,omitempty"`
 }
 
 // LangJapanese と LangEnglish は AIModels.Lang に指定できる言語コードです。
@@ -45,6 +51,17 @@ const (
 	LyricReadingKana     = "kana"
 	LyricReadingOriginal = "original"
 )
+
+// AudioTargetLyria と AudioTargetSuno は AIModels.AudioTarget に指定できる値です。
+const (
+	AudioTargetLyria = "lyria"
+	AudioTargetSuno  = "suno"
+)
+
+// TargetsSuno は、レシピが Suno 向けに作られたかを返します。
+func (m AIModels) TargetsSuno() bool {
+	return m.AudioTarget == AudioTargetSuno
+}
 
 // SendsLyricsAsWritten は、日本語詞を変換せず書かれたままの表記で渡すかを返します。
 func (m AIModels) SendsLyricsAsWritten() bool {

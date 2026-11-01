@@ -28,6 +28,7 @@ func TestRecipeJSONWireFormat(t *testing.T) {
 			Seed:         &seed,
 			Lang:         LangJapanese,
 			LyricReading: LyricReadingKana,
+			AudioTarget:  AudioTargetSuno,
 		},
 	}
 
@@ -45,7 +46,7 @@ func TestRecipeJSONWireFormat(t *testing.T) {
 	for _, key := range []string{
 		"title", "theme", "mood", "tempo", "key", "vocal_profile",
 		"instruments", "sections", "lyrics",
-		"text_model", "audio_model", "seed", "lang", "lyric_reading",
+		"text_model", "audio_model", "seed", "lang", "lyric_reading", "audio_target",
 	} {
 		if _, ok := raw[key]; !ok {
 			t.Errorf("キー %q がありません（ワイヤ形式が変わっています）: %s", key, data)
@@ -144,6 +145,23 @@ func TestSendsLyricsAsWrittenDefaultsToKana(t *testing.T) {
 	} {
 		if got := (AIModels{LyricReading: tt.reading}).SendsLyricsAsWritten(); got != tt.want {
 			t.Errorf("SendsLyricsAsWritten(%q) = %v, want %v", tt.reading, got, tt.want)
+		}
+	}
+}
+
+// TestTargetsSunoDefaultsToLyria は、未指定を Lyria 向けとして扱うことを保証します。
+// 既存の recipe.json には項目が無いので、未指定が Lyria でないと過去のレシピが別の構成として扱われます。
+func TestTargetsSunoDefaultsToLyria(t *testing.T) {
+	for _, tt := range []struct {
+		target string
+		want   bool
+	}{
+		{"", false},
+		{AudioTargetLyria, false},
+		{AudioTargetSuno, true},
+	} {
+		if got := (AIModels{AudioTarget: tt.target}).TargetsSuno(); got != tt.want {
+			t.Errorf("TargetsSuno(%q) = %v, want %v", tt.target, got, tt.want)
 		}
 	}
 }
