@@ -22,18 +22,6 @@ type AIModels struct {
 	Seed        *int64 `json:"seed,omitempty"`
 	// Lang は歌詞・ボーカルの言語コードです（"ja" / "en"）。空は "ja" 扱いです。
 	Lang string `json:"lang,omitempty"`
-	// LyricReading は、日本語詞を音声生成へ渡すときの表記です（LyricReadingKana /
-	// LyricReadingOriginal）。空は LyricReadingKana 扱いで、英語詞には効きません。
-	//
-	// レシピに載せるのは、プロンプトを組む側に届く情報がレシピだけだからです。recipe.json に
-	// 残るので、作り直しでも同じレシピを両方の表記で走らせられます。
-	LyricReading string `json:"lyric_reading,omitempty"`
-	// AudioTarget は、このレシピの音声をどのモデルで作るつもりかです（AudioTargetLyria /
-	// AudioTargetSuno）。空は AudioTargetLyria 扱いです。
-	//
-	// 構成と歌詞の分量はレシピを作る時点で生成先に合わせて決まるため、作り直しでも同じ前提で
-	// 扱えるようレシピに残します。AudioModel は実際に使ったモデル名で、こちらは設計上の宛先です。
-	AudioTarget string `json:"audio_target,omitempty"`
 }
 
 // LangJapanese と LangEnglish は AIModels.Lang に指定できる言語コードです。
@@ -41,32 +29,6 @@ const (
 	LangJapanese = "ja"
 	LangEnglish  = "en"
 )
-
-// LyricReadingKana と LyricReadingOriginal は AIModels.LyricReading に指定できる値です。
-//
-// Kana は読み表記（カタカナ）へ変換してから渡す既定で、漢字の読み違いを防ぎます。Original は
-// 書かれたまま渡し、読み表記では失われる語の区切りと意味を発音の手がかりとして残します。
-// どちらが良いかはモデルで変わるため、選択を値として持ちます。
-const (
-	LyricReadingKana     = "kana"
-	LyricReadingOriginal = "original"
-)
-
-// AudioTargetLyria と AudioTargetSuno は AIModels.AudioTarget に指定できる値です。
-const (
-	AudioTargetLyria = "lyria"
-	AudioTargetSuno  = "suno"
-)
-
-// TargetsSuno は、レシピが Suno 向けに作られたかを返します。
-func (m AIModels) TargetsSuno() bool {
-	return m.AudioTarget == AudioTargetSuno
-}
-
-// SendsLyricsAsWritten は、日本語詞を変換せず書かれたままの表記で渡すかを返します。
-func (m AIModels) SendsLyricsAsWritten() bool {
-	return m.LyricReading == LyricReadingOriginal
-}
 
 // LyricsDraft は、レシピ生成の入力になる構造化された歌詞出力です。
 type LyricsDraft struct {
@@ -94,6 +56,10 @@ func (d *LyricsDraft) Clone() *LyricsDraft {
 //
 // JSON タグは下流サービスが GCS へ保存するレシピ JSON のワイヤ形式そのものです。
 // タグ名を変えると保存済みのレシピが読めなくなります。
+//
+// ここに置くのは、どのサービスにも通じる楽曲の語彙だけです。生成先のモデルや歌詞の表記の
+// ような呼び出し側の方針は、Recipe を埋め込んだ呼び出し側の型に置いてください。埋め込めば
+// JSON では同じ階層に並ぶので、レシピ JSON は 1 つのまま保てます。
 type Recipe struct {
 	Title        string       `json:"title"`
 	Theme        string       `json:"theme"`

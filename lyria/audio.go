@@ -12,9 +12,25 @@ import (
 	"github.com/shouni/genai-kit/gemini"
 )
 
-// AudioGenerator は MusicRecipe から音声を生成します。
+// AudioGenerator は、組み立て済みのプロンプトから音声を生成します。
 type AudioGenerator interface {
-	GenerateAudio(ctx context.Context, recipe *MusicRecipe, images []ImagePayload) (*Track, error)
+	GenerateAudio(ctx context.Context, req AudioRequest) (*Track, error)
+}
+
+// AudioRequest は 1 回の音声生成の入力です。
+//
+// レシピではなくプロンプトを受け取るのは、プロンプトの組み立てが呼び出し側の方針で決まるからです。
+// 歌詞をどの表記で渡すか、どの生成先向けの構成か、といった判断はレシピの外の情報を要し、
+// このパッケージが Recipe を受け取ってビルダーへ回すと、その情報を Recipe に載せるしかなくなります。
+type AudioRequest struct {
+	// Prompt は Lyria へ渡すプロンプト全文です。空は ErrNilInput です。
+	Prompt string
+	// Model は使う音声モデルです。空は WithLyriaModel の既定です。
+	Model string
+	// Seed は Lyria へ渡す seed です。nil は指定なしです。
+	Seed *int64
+	// Images は添える参照画像です。
+	Images []ImagePayload
 }
 
 // Track は 1 回の音声生成の結果です。MIME type とテキストは呼び出し側で作り直せないため、
@@ -48,46 +64,37 @@ func (t *Track) Clone() *Track {
 	return &dst
 }
 
-// AudioPromptBuilder は Lyria の音声生成用プロンプトを構築するインターフェースです。
-// メソッドは曲そのものではなくプロンプト文字列を返すため、名詞で示します。
-//
-// 読み仮名変換のような表記の加工も実装側の仕事です。どの行が歌詞なのかを知っているのは
-// プロンプトを組んだ側だけなので、変換の適用範囲もそこでしか決められません。
-type AudioPromptBuilder interface {
-	FullSongPrompt(recipe *MusicRecipe) string
-}
-
-// audioGenerator は MusicRecipe を Lyria に渡し、音声を生成します。
+// audioGenerator はプロンプトを Lyria に渡し、音声を生成します。
 type audioGenerator struct {
 	aiClient          gemini.Generator
-	prompts           AudioPromptBuilder
 	defaultLyriaModel string
 	// guard は nil で「制限なし・既定の上限時間」を意味します。
 	guard *callguard.Guard
 	group callguard.Group
 }
 
-// GenerateAudio は MusicRecipe 全体を 1 回の Lyria 呼び出しで音声化します。
-func (g *audioGenerator) GenerateAudio(ctx context.Context, recipe *MusicRecipe, images []ImagePayload) (*Track, error) {
-	if recipe == nil {
-		return nil, fmt.Errorf("%w: music recipe", ErrNilInput)
+// GenerateAudio はプロンプトを 1 回の Lyria 呼び出しで音声化します。
+func (g *audioGenerator) GenerateAudio(ctx context.Context, req AudioRequest) (*Track, error) {
+	if req.Prompt == "" {
+		return nil, fmt.Errorf("%w: audio prompt", ErrNilInput)
 	}
 
 	targetModel := g.defaultLyriaModel
-	if recipe.AudioModel != "" {
-		targetModel = recipe.AudioModel
+	if req.Model != "" {
+		targetModel = req.Model
 	}
 
-	promptText := g.prompts.FullSongPrompt(recipe)
+	promptText := req.Prompt
+	images := req.Images
 	imageHash := imagesHash(images)
-	key := callguard.Key("audio-full", targetModel, promptText, callguard.SeedKey(recipe.Seed), imageHash)
+	key := callguard.Key("audio-full", targetModel, promptText, callguard.SeedKey(req.Seed), imageHash)
 	track, err := callguard.Do(ctx, &g.group, g.guard, key, func(execCtx context.Context) (*Track, error) {
 		resp, err := g.aiClient.Generate(
 			execCtx,
 			targetModel,
 			promptText,
 			images,
-			audioOptions(recipe.Seed),
+			audioOptions(req.Seed),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("lyria generation failed (model: %s): %w", targetModel, err)
