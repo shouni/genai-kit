@@ -13,10 +13,9 @@ import (
 )
 
 // newAudioGenerator は、発射間隔なしの audioGenerator を組み立てます。
-func newAudioGenerator(ai gemini.Generator, prompts AudioPromptBuilder) *audioGenerator {
+func newAudioGenerator(ai gemini.Generator) *audioGenerator {
 	return &audioGenerator{
 		aiClient:          ai,
-		prompts:           prompts,
 		defaultLyriaModel: "lyria-3",
 	}
 }
@@ -36,21 +35,17 @@ func TestTrackCloneIsIndependent(t *testing.T) {
 	assert.Nil(t, (*Track)(nil).Clone())
 }
 
-// TestGenerateAudioSendsPromptAndImages は、組み立てたプロンプトと画像が
+// TestGenerateAudioSendsPromptAndImages は、呼び出し側のプロンプトと画像が
 // そのまま Lyria へ渡ることを検証します。
 func TestGenerateAudioSendsPromptAndImages(t *testing.T) {
 	ai := audioResponder([]byte{1, 2, 3})
-	prompts := &stubAudioPrompts{fullSong: "full prompt"}
-	g := newAudioGenerator(ai, prompts)
+	g := newAudioGenerator(ai)
 
-	recipe := &MusicRecipe{Title: "Song"}
 	images := []ImagePayload{{Data: []byte("cover"), MIMEType: "image/png"}}
 
-	track, err := g.GenerateAudio(context.Background(), recipe, images)
+	track, err := g.GenerateAudio(context.Background(), AudioRequest{Prompt: "full prompt", Images: images})
 	require.NoError(t, err)
 	assert.Equal(t, []byte{1, 2, 3}, track.Audio)
-
-	assert.Same(t, recipe, prompts.gotRecipe, "プロンプト構築にレシピがそのまま渡ること")
 
 	call := ai.lastCall(t)
 	assert.Equal(t, "full prompt", call.Prompt)
@@ -60,7 +55,7 @@ func TestGenerateAudioSendsPromptAndImages(t *testing.T) {
 	assert.NotEmpty(t, call.Opts.SafetySettings)
 }
 
-// TestGenerateAudioResolvesModel は、レシピが指定するモデルが既定より優先される
+// TestGenerateAudioResolvesModel は、呼び出し側が指定するモデルが既定より優先される
 // ことを検証します。
 func TestGenerateAudioResolvesModel(t *testing.T) {
 	tests := []struct {
@@ -69,16 +64,15 @@ func TestGenerateAudioResolvesModel(t *testing.T) {
 		want       string
 	}{
 		{"未指定なら既定モデル", "", "lyria-3"},
-		{"レシピの指定が優先されること", "lyria-custom", "lyria-custom"},
+		{"呼び出し側の指定が優先されること", "lyria-custom", "lyria-custom"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ai := audioResponder([]byte{1})
-			g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "p"})
+			g := newAudioGenerator(ai)
 
-			_, err := g.GenerateAudio(context.Background(),
-				&MusicRecipe{Title: "Song", AIModels: AIModels{AudioModel: tt.audioModel}}, nil)
+			_, err := g.GenerateAudio(context.Background(), AudioRequest{Prompt: "p", Model: tt.audioModel})
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, ai.lastCall(t).Model)
@@ -91,9 +85,9 @@ func TestGenerateAudioResolvesModel(t *testing.T) {
 // （WAV と MP3 は取り違えます）、譜面のテキストに至っては復元する手立てがありません。
 func TestGenerateAudioReturnsMIMETypeAndSungLyrics(t *testing.T) {
 	ai := &fakeGenerator{resp: audioResponse("audio/mpeg", []byte{1, 2, 3}, "[[V1]]\n[:] sung line")}
-	g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "p"})
+	g := newAudioGenerator(ai)
 
-	track, err := g.GenerateAudio(context.Background(), &MusicRecipe{Title: "Song"}, nil)
+	track, err := g.GenerateAudio(context.Background(), AudioRequest{Prompt: "p"})
 
 	require.NoError(t, err)
 	assert.Equal(t, []byte{1, 2, 3}, track.Audio)
@@ -111,24 +105,23 @@ func TestGenerateAudioPicksTheFirstAudioAttachment(t *testing.T) {
 			{MIMEType: "audio/mpeg", Data: []byte{9}},
 		},
 	}}
-	g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "p"})
+	g := newAudioGenerator(ai)
 
-	track, err := g.GenerateAudio(context.Background(), &MusicRecipe{Title: "Song"}, nil)
+	track, err := g.GenerateAudio(context.Background(), AudioRequest{Prompt: "p"})
 
 	require.NoError(t, err)
 	assert.Equal(t, []byte{1, 2, 3}, track.Audio)
 	assert.Equal(t, "audio/wav", track.MIMEType)
 }
 
-// TestGenerateAudioKeepsSeed は、レシピのシードが生成呼び出しへ渡ることを
+// TestGenerateAudioKeepsSeed は、指定したシードが生成呼び出しへ渡ることを
 // 検証します。落とすと、レシピを保存していても同じ曲を作り直せません。
 func TestGenerateAudioKeepsSeed(t *testing.T) {
 	seed := int64(42)
 	ai := audioResponder([]byte{1})
-	g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "p"})
+	g := newAudioGenerator(ai)
 
-	_, err := g.GenerateAudio(context.Background(),
-		&MusicRecipe{Title: "Song", AIModels: AIModels{Seed: &seed}}, nil)
+	_, err := g.GenerateAudio(context.Background(), AudioRequest{Prompt: "p", Seed: &seed})
 	require.NoError(t, err)
 
 	got := ai.lastCall(t).Opts.Seed
@@ -169,9 +162,9 @@ func TestGenerateAudioErrorBranches(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := newAudioGenerator(tt.ai, &stubAudioPrompts{fullSong: "p"})
+			g := newAudioGenerator(tt.ai)
 
-			track, err := g.GenerateAudio(context.Background(), &MusicRecipe{Title: "Song"}, nil)
+			track, err := g.GenerateAudio(context.Background(), AudioRequest{Prompt: "p"})
 
 			require.Error(t, err)
 			assert.Nil(t, track)
@@ -182,12 +175,14 @@ func TestGenerateAudioErrorBranches(t *testing.T) {
 	}
 }
 
-func TestGenerateAudioRejectsNilRecipe(t *testing.T) {
-	g := newAudioGenerator(&fakeGenerator{}, &stubAudioPrompts{})
+func TestGenerateAudioRejectsEmptyPrompt(t *testing.T) {
+	ai := &fakeGenerator{}
+	g := newAudioGenerator(ai)
 
-	_, err := g.GenerateAudio(context.Background(), nil, nil)
+	_, err := g.GenerateAudio(context.Background(), AudioRequest{})
 
 	assert.ErrorIs(t, err, ErrNilInput)
+	assert.Zero(t, ai.callCount(), "空のプロンプトで Lyria を呼んでいます")
 }
 
 // TestGenerateAudioDeduplicatesConcurrentCalls は、同一内容の同時呼び出しが 1 回に
@@ -196,10 +191,9 @@ func TestGenerateAudioDeduplicatesConcurrentCalls(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
 		ai := &fakeGenerator{block: release, resp: audioResponse("audio/mpeg", []byte{1, 2, 3}, "sung lyrics")}
-		g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "full prompt"})
+		g := newAudioGenerator(ai)
 
 		seed := int64(7)
-		recipe := &MusicRecipe{Title: "Song", AIModels: AIModels{Seed: &seed}}
 		images := []ImagePayload{{Data: []byte("cover"), MIMEType: "image/png"}}
 
 		const callers = 5
@@ -209,7 +203,7 @@ func TestGenerateAudioDeduplicatesConcurrentCalls(t *testing.T) {
 		var wg sync.WaitGroup
 		for i := range callers {
 			wg.Go(func() {
-				results[i], errs[i] = g.GenerateAudio(context.Background(), recipe, images)
+				results[i], errs[i] = g.GenerateAudio(context.Background(), AudioRequest{Prompt: "full prompt", Seed: &seed, Images: images})
 			})
 		}
 
@@ -238,10 +232,9 @@ func TestGenerateAudioSeparatesDifferentImages(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
 		ai := &fakeGenerator{block: release, resp: audioResponse("audio/mpeg", []byte{1, 2, 3}, "sung lyrics")}
-		g := newAudioGenerator(ai, &stubAudioPrompts{fullSong: "full prompt"})
+		g := newAudioGenerator(ai)
 
 		seed := int64(7)
-		recipe := &MusicRecipe{Title: "Song", AIModels: AIModels{Seed: &seed}}
 		imagesA := []ImagePayload{{Data: []byte("image-a"), MIMEType: "image/png"}}
 		imagesB := []ImagePayload{{Data: []byte("image-b"), MIMEType: "image/png"}}
 
@@ -249,7 +242,7 @@ func TestGenerateAudioSeparatesDifferentImages(t *testing.T) {
 		errs := make([]error, 2)
 		for i, images := range [][]ImagePayload{imagesA, imagesB} {
 			wg.Go(func() {
-				_, errs[i] = g.GenerateAudio(context.Background(), recipe, images)
+				_, errs[i] = g.GenerateAudio(context.Background(), AudioRequest{Prompt: "full prompt", Seed: &seed, Images: images})
 			})
 		}
 

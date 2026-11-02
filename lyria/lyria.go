@@ -32,20 +32,18 @@ type Workflow struct {
 	audio    AudioGenerator
 }
 
-// New は、AI クライアントとプロンプト構築の実装を注入して Workflow を作ります。
+// New は、AI クライアントと作詞・作曲プロンプトの実装を注入して Workflow を作ります。
+// 音声生成のプロンプトは呼び出し側が組み立てて GenerateAudio へ渡します（AudioRequest）。
 //
 // モデル名は WithGeminiModel / WithLyriaModel で必ず指定してください。
 // 既定値を持たないのは、モデルの選択が品質とコストを直接決めるためです。
-func New(aiClient gemini.Generator, textPrompts TextPromptBuilder, audioPrompts AudioPromptBuilder, overrides ...Option) (*Workflow, error) {
+func New(aiClient gemini.Generator, textPrompts TextPromptBuilder, overrides ...Option) (*Workflow, error) {
 	opts := applyOptions(overrides...)
 	if aiClient == nil {
 		return nil, fmt.Errorf("%w: aiClient is required", ErrWorkflowConfig)
 	}
 	if textPrompts == nil {
 		return nil, fmt.Errorf("%w: textPrompts is required", ErrWorkflowConfig)
-	}
-	if audioPrompts == nil {
-		return nil, fmt.Errorf("%w: audioPrompts is required", ErrWorkflowConfig)
 	}
 	if opts.geminiModel == "" {
 		return nil, fmt.Errorf("%w: GeminiModel is required but not set", ErrWorkflowConfig)
@@ -83,7 +81,6 @@ func New(aiClient gemini.Generator, textPrompts TextPromptBuilder, audioPrompts 
 		composer: textGen,
 		audio: &audioGenerator{
 			aiClient:          audioClient,
-			prompts:           audioPrompts,
 			guard:             audioGuard,
 			defaultLyriaModel: opts.lyriaModel,
 		},
@@ -100,7 +97,7 @@ func (w *Workflow) Compose(ctx context.Context, ai AIModels, lyrics *LyricsDraft
 	return w.composer.Compose(ctx, ai, lyrics)
 }
 
-// GenerateAudio は楽曲レシピから曲全体の音声を生成します。
-func (w *Workflow) GenerateAudio(ctx context.Context, recipe *MusicRecipe, images []ImagePayload) (*Track, error) {
-	return w.audio.GenerateAudio(ctx, recipe, images)
+// GenerateAudio は組み立て済みのプロンプトから曲全体の音声を生成します。
+func (w *Workflow) GenerateAudio(ctx context.Context, req AudioRequest) (*Track, error) {
+	return w.audio.GenerateAudio(ctx, req)
 }

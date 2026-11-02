@@ -18,9 +18,8 @@ import (
 // メソッド名を文字列で指定する仕組みだと、gemini 側の改名がコンパイルではなく
 // 実行時（期待の不一致）に露見するという実害もあります。
 var (
-	_ gemini.Generator   = (*fakeGenerator)(nil)
-	_ TextPromptBuilder  = (*stubTextPrompts)(nil)
-	_ AudioPromptBuilder = (*stubAudioPrompts)(nil)
+	_ gemini.Generator  = (*fakeGenerator)(nil)
+	_ TextPromptBuilder = (*stubTextPrompts)(nil)
 )
 
 // generateCall は fakeGenerator が受け取った 1 回分の呼び出しです。
@@ -135,31 +134,15 @@ func (s *stubTextPrompts) RecipePrompt(mode string, lyrics *LyricsDraft) (string
 	return s.recipePrompt, s.recipeErr
 }
 
-// stubAudioPrompts は AudioPromptBuilder のテストダブルです。
-type stubAudioPrompts struct {
-	fullSong string
-
-	mu        sync.Mutex
-	gotRecipe *MusicRecipe
-}
-
-func (s *stubAudioPrompts) FullSongPrompt(recipe *MusicRecipe) string {
-	s.mu.Lock()
-	s.gotRecipe = recipe
-	s.mu.Unlock()
-
-	return s.fullSong
-}
-
 const validLyricsJSON = `{"title":"t","theme":"th","hook":"h","lyrics":"l"}`
 
 // newTestWorkflow は、モデル名を埋めた最小構成の Workflow を作ります。
 // 発射間隔は既定で 0（制限なし）です。
-func newTestWorkflow(t *testing.T, ai gemini.Generator, text TextPromptBuilder, audio AudioPromptBuilder, extra ...Option) *Workflow {
+func newTestWorkflow(t *testing.T, ai gemini.Generator, text TextPromptBuilder, extra ...Option) *Workflow {
 	t.Helper()
 
 	base := []Option{WithGeminiModel("gemini-flash"), WithLyriaModel("lyria-3")}
-	w, err := New(ai, text, audio, append(base, extra...)...)
+	w, err := New(ai, text, append(base, extra...)...)
 	require.NoError(t, err)
 	return w
 }
@@ -169,25 +152,22 @@ func newTestWorkflow(t *testing.T, ai gemini.Generator, text TextPromptBuilder, 
 func TestNewRequiresDependenciesAndModels(t *testing.T) {
 	ai := &fakeGenerator{}
 	text := &stubTextPrompts{}
-	audio := &stubAudioPrompts{}
 
 	tests := []struct {
-		name  string
-		ai    gemini.Generator
-		text  TextPromptBuilder
-		audio AudioPromptBuilder
-		opts  []Option
+		name string
+		ai   gemini.Generator
+		text TextPromptBuilder
+		opts []Option
 	}{
-		{"aiClient が nil", nil, text, audio, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
-		{"textPrompts が nil", ai, nil, audio, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
-		{"audioPrompts が nil", ai, text, nil, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
-		{"GeminiModel が未指定", ai, text, audio, []Option{WithLyriaModel("l")}},
-		{"LyriaModel が未指定", ai, text, audio, []Option{WithGeminiModel("g")}},
+		{"aiClient が nil", nil, text, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
+		{"textPrompts が nil", ai, nil, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
+		{"GeminiModel が未指定", ai, text, []Option{WithLyriaModel("l")}},
+		{"LyriaModel が未指定", ai, text, []Option{WithGeminiModel("g")}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w, err := New(tt.ai, tt.text, tt.audio, tt.opts...)
+			w, err := New(tt.ai, tt.text, tt.opts...)
 
 			require.ErrorIs(t, err, ErrWorkflowConfig)
 			assert.Nil(t, w)
@@ -195,7 +175,7 @@ func TestNewRequiresDependenciesAndModels(t *testing.T) {
 	}
 
 	t.Run("すべて揃っていれば成功する", func(t *testing.T) {
-		w, err := New(ai, text, audio, WithGeminiModel("g"), WithLyriaModel("l"))
+		w, err := New(ai, text, WithGeminiModel("g"), WithLyriaModel("l"))
 
 		require.NoError(t, err)
 		require.NotNil(t, w)
@@ -205,7 +185,7 @@ func TestNewRequiresDependenciesAndModels(t *testing.T) {
 // TestNewIgnoresNilOption は、nil の Option を渡しても落ちないことを検証します。
 // 条件付きでオプションを組み立てる呼び出し側が、分岐を書かずに済みます。
 func TestNewIgnoresNilOption(t *testing.T) {
-	_, err := New(&fakeGenerator{}, &stubTextPrompts{}, &stubAudioPrompts{},
+	_, err := New(&fakeGenerator{}, &stubTextPrompts{},
 		WithGeminiModel("g"), nil, WithLyriaModel("l"))
 
 	require.NoError(t, err)
@@ -218,7 +198,7 @@ func TestWorkflowDelegatesToEachRole(t *testing.T) {
 
 	t.Run("歌詞生成は Gemini モデルへ", func(t *testing.T) {
 		ai := textResponder(validLyricsJSON)
-		w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "lyrics prompt"}, &stubAudioPrompts{})
+		w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "lyrics prompt"})
 
 		draft, err := w.GenerateLyrics(ctx, AIModels{}, &CollectedContent{Prompt: "input"})
 
@@ -229,7 +209,7 @@ func TestWorkflowDelegatesToEachRole(t *testing.T) {
 
 	t.Run("作曲は Gemini モデルへ", func(t *testing.T) {
 		ai := textResponder(`{"title":"Song","tempo":120}`)
-		w := newTestWorkflow(t, ai, &stubTextPrompts{recipePrompt: "recipe prompt"}, &stubAudioPrompts{})
+		w := newTestWorkflow(t, ai, &stubTextPrompts{recipePrompt: "recipe prompt"})
 
 		recipe, err := w.Compose(ctx, AIModels{}, &LyricsDraft{Lyrics: "l"})
 
@@ -240,9 +220,9 @@ func TestWorkflowDelegatesToEachRole(t *testing.T) {
 
 	t.Run("音声生成は Lyria モデルへ", func(t *testing.T) {
 		ai := audioResponder([]byte{1, 2, 3})
-		w := newTestWorkflow(t, ai, &stubTextPrompts{}, &stubAudioPrompts{fullSong: "full prompt"})
+		w := newTestWorkflow(t, ai, &stubTextPrompts{})
 
-		track, err := w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
+		track, err := w.GenerateAudio(ctx, AudioRequest{Prompt: "full prompt"})
 
 		require.NoError(t, err)
 		assert.Equal(t, []byte{1, 2, 3}, track.Audio)
@@ -264,12 +244,12 @@ func TestNewRoutesAudioToAudioGenerator(t *testing.T) {
 	t.Run("指定すれば音声だけがそちらへ行くこと", func(t *testing.T) {
 		text := textResponder(validLyricsJSON)
 		audioAI := audioResponder([]byte{1, 2, 3})
-		w := newTestWorkflow(t, text, &stubTextPrompts{lyricsPrompt: "p"}, &stubAudioPrompts{fullSong: "full"},
+		w := newTestWorkflow(t, text, &stubTextPrompts{lyricsPrompt: "p"},
 			WithAudioGenerator(audioAI))
 
 		_, err := w.GenerateLyrics(ctx, AIModels{}, &CollectedContent{Prompt: "x"})
 		require.NoError(t, err)
-		track, err := w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
+		track, err := w.GenerateAudio(ctx, AudioRequest{Prompt: "full prompt"})
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, text.callCount(), "作詞は aiClient へ")
@@ -285,11 +265,11 @@ func TestNewRoutesAudioToAudioGenerator(t *testing.T) {
 			}
 			return &gemini.Response{Text: validLyricsJSON}, nil
 		}}
-		w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "p"}, &stubAudioPrompts{fullSong: "full"})
+		w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "p"})
 
 		_, err := w.GenerateLyrics(ctx, AIModels{}, &CollectedContent{Prompt: "x"})
 		require.NoError(t, err)
-		_, err = w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
+		_, err = w.GenerateAudio(ctx, AudioRequest{Prompt: "full prompt"})
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, ai.callCount())
@@ -311,7 +291,7 @@ func TestTextAndAudioHaveSeparateRateGuards(t *testing.T) {
 				}
 				return &gemini.Response{Text: validLyricsJSON}, nil
 			}}
-			w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "p"}, &stubAudioPrompts{fullSong: "full"},
+			w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "p"},
 				WithTextRateInterval(textInterval), WithRateInterval(0))
 
 			ctx := context.Background()
@@ -326,7 +306,7 @@ func TestTextAndAudioHaveSeparateRateGuards(t *testing.T) {
 
 			// 音声側は制限なしなので、テキスト側の混雑に引きずられない。
 			beforeAudio := time.Now()
-			_, err = w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
+			_, err = w.GenerateAudio(ctx, AudioRequest{Prompt: "full prompt"})
 			require.NoError(t, err)
 			assert.Zero(t, time.Since(beforeAudio), "音声生成がテキスト側の発射間隔に巻き込まれています")
 		})
@@ -340,12 +320,12 @@ func TestTextAndAudioHaveSeparateRateGuards(t *testing.T) {
 				}
 				return &gemini.Response{Text: validLyricsJSON}, nil
 			}}
-			w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "p"}, &stubAudioPrompts{fullSong: "full"},
+			w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "p"},
 				WithRateInterval(audioInterval), WithTextRateInterval(0))
 
 			ctx := context.Background()
 			// 音声側の枠を 1 つ使っておく。
-			_, err := w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
+			_, err := w.GenerateAudio(ctx, AudioRequest{Prompt: "full prompt"})
 			require.NoError(t, err)
 
 			start := time.Now()
@@ -363,7 +343,7 @@ func TestWorkflowPropagatesRoleErrors(t *testing.T) {
 	ctx := context.Background()
 	sentinel := errors.New("ai boom")
 	ai := &fakeGenerator{err: sentinel}
-	w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "p", recipePrompt: "p"}, &stubAudioPrompts{fullSong: "p"})
+	w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "p", recipePrompt: "p"})
 
 	_, err := w.GenerateLyrics(ctx, AIModels{}, &CollectedContent{Prompt: "x"})
 	assert.ErrorIs(t, err, sentinel)
@@ -371,6 +351,6 @@ func TestWorkflowPropagatesRoleErrors(t *testing.T) {
 	_, err = w.Compose(ctx, AIModels{}, &LyricsDraft{Lyrics: "l"})
 	assert.ErrorIs(t, err, sentinel)
 
-	_, err = w.GenerateAudio(ctx, &MusicRecipe{Title: "Song"}, nil)
+	_, err = w.GenerateAudio(ctx, AudioRequest{Prompt: "full prompt"})
 	assert.ErrorIs(t, err, sentinel)
 }
