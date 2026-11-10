@@ -1,36 +1,35 @@
-// Package music は、楽曲構成を表すデータ型（Recipe とその周辺）を提供します。
+// Package music provides the data types that describe a song's structure (Recipe and related types).
 //
-// これらの型は lyria の生成ワークフローだけでなく、動画生成・履歴表示など
-// 多くの下流サービスが「楽曲の語彙」として共有します。ワークフロー本体
-// （レート制限や singleflight を伴う lyria パッケージ）を輸入せずに型だけを
-// 参照できるよう、依存を持たない葉パッケージとして分離しています。
-// lyria パッケージは互換のため MusicRecipe = music.Recipe などの別名を公開しています。
+// These types are shared as "the vocabulary of a song" not only by lyria's generation workflow
+// but by many downstream services, such as video generation and history display. They are split
+// out as a dependency-free leaf package so that the types can be referenced without importing
+// the workflow itself (the lyria package, with its rate limiting and singleflight).
+// For compatibility, the lyria package exposes aliases such as MusicRecipe = music.Recipe.
 package music
 
 import "slices"
 
-// AIModels は、楽曲生成に使うテキスト／音声モデルと生成モードの指定です。
+// AIModels specifies the text and audio models used for song generation and the generation mode.
 //
-// Recipe に埋め込まれるため、JSON タグは Recipe の他のフィールドと
-// 同じ snake_case に揃えています。タグを省くと Go のフィールド名がそのまま
-// レシピ JSON に出力されてしまいます。
+// It is embedded in Recipe, so its JSON tags use the same snake_case as Recipe's other
+// fields. Without tags, the Go field names would be written to the recipe JSON as is.
 type AIModels struct {
 	TextModel   string `json:"text_model,omitempty"`
 	AudioModel  string `json:"audio_model,omitempty"`
 	LyricsMode  string `json:"lyrics_mode,omitempty"`
 	ComposeMode string `json:"compose_mode,omitempty"`
 	Seed        *int64 `json:"seed,omitempty"`
-	// Lang は歌詞・ボーカルの言語コードです（"ja" / "en"）。空は "ja" 扱いです。
+	// Lang is the language code of the lyrics and vocals ("ja" / "en"). Empty is treated as "ja".
 	Lang string `json:"lang,omitempty"`
 }
 
-// LangJapanese と LangEnglish は AIModels.Lang に指定できる言語コードです。
+// LangJapanese and LangEnglish are the language codes that can be set on AIModels.Lang.
 const (
 	LangJapanese = "ja"
 	LangEnglish  = "en"
 )
 
-// LyricsDraft は、レシピ生成の入力になる構造化された歌詞出力です。
+// LyricsDraft is the structured lyrics output that serves as input to recipe generation.
 type LyricsDraft struct {
 	Title     string   `json:"title"`
 	Theme     string   `json:"theme"`
@@ -41,7 +40,7 @@ type LyricsDraft struct {
 	Narrative string   `json:"narrative,omitempty"`
 }
 
-// Clone は LyricsDraft を呼び出し元が安全に変更できるように複製します。
+// Clone copies the LyricsDraft so that the caller can modify it safely.
 func (d *LyricsDraft) Clone() *LyricsDraft {
 	if d == nil {
 		return nil
@@ -52,14 +51,14 @@ func (d *LyricsDraft) Clone() *LyricsDraft {
 	return &dst
 }
 
-// Recipe は楽曲の構成と生成設定を表します。
+// Recipe describes a song's structure and generation settings.
 //
-// JSON タグは下流サービスが GCS へ保存するレシピ JSON のワイヤ形式そのものです。
-// タグ名を変えると保存済みのレシピが読めなくなります。
+// The JSON tags are the wire format itself of the recipe JSON that downstream services store in GCS.
+// Renaming a tag makes stored recipes unreadable.
 //
-// ここに置くのは、どのサービスにも通じる楽曲の語彙だけです。生成先のモデルや歌詞の表記の
-// ような呼び出し側の方針は、Recipe を埋め込んだ呼び出し側の型に置いてください。埋め込めば
-// JSON では同じ階層に並ぶので、レシピ JSON は 1 つのまま保てます。
+// Only song vocabulary that applies to every service belongs here. Caller policy, such as the
+// target model or how lyrics are written, belongs on the caller's own type that embeds Recipe. Once
+// embedded, its fields sit at the same level in JSON, so the recipe JSON stays a single object.
 type Recipe struct {
 	Title        string       `json:"title"`
 	Theme        string       `json:"theme"`
@@ -73,15 +72,15 @@ type Recipe struct {
 	AIModels
 }
 
-// IsJapanese は、このレシピが日本語楽曲かどうかを返します。Lang 未指定は日本語扱いです。
+// IsJapanese reports whether this recipe is a Japanese song. An unspecified Lang is treated as Japanese.
 func (r *Recipe) IsJapanese() bool {
 	return r.Lang == "" || r.Lang == LangJapanese
 }
 
-// Clone は Recipe と内部のスライスやポインタを複製します。
+// Clone copies the Recipe along with its internal slices and pointers.
 //
-// スライスは slices.Clone で写します。nil は nil、空は空のまま残るため、複製を
-// 経由しても JSON のワイヤ形式（instruments の null と []）が変わりません。
+// Slices are copied with slices.Clone. nil stays nil and empty stays empty, so the JSON wire
+// format (null versus [] for instruments) does not change through a copy.
 func (r *Recipe) Clone() *Recipe {
 	if r == nil {
 		return nil
@@ -98,7 +97,7 @@ func (r *Recipe) Clone() *Recipe {
 	return &dst
 }
 
-// Section は楽曲の 1 セクション（Verse / Chorus など）です。
+// Section is one section of a song (Verse, Chorus, etc.).
 type Section struct {
 	Name         string `json:"name"`
 	Duration     int    `json:"duration_seconds"`

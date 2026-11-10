@@ -10,15 +10,15 @@ import (
 	"google.golang.org/genai"
 )
 
-// Generator は、テキストとバイナリ添付からコンテンツを生成するインターフェースです。
+// Generator is the interface that generates content from text and binary attachments.
 //
-// genai の型を含まないため、利用側はこのインターフェースにだけ依存すれば
-// genai SDK を import せずに済みます。モックも 1 メソッドで書けます。
+// It contains no genai types, so callers depending only on this interface do not need to
+// import the genai SDK. A mock needs only one method.
 type Generator interface {
 	Generate(ctx context.Context, model string, prompt string, attachments []Attachment, opts GenerateOptions) (*Response, error)
 }
 
-// GenerateText は、オプション無しの純粋なテキストプロンプトからコンテンツを生成する最短経路です。
+// GenerateText is the shortest path for generating content from a plain text prompt with no options.
 func (c *Client) GenerateText(ctx context.Context, model string, prompt string) (*Response, error) {
 	if prompt == "" {
 		return nil, ErrEmptyPrompt
@@ -27,14 +27,15 @@ func (c *Client) GenerateText(ctx context.Context, model string, prompt string) 
 	return c.generateParts(ctx, model, parts, GenerateOptions{})
 }
 
-// Generate は、テキストプロンプトとバイナリ添付からコンテンツを生成します。
+// Generate generates content from a text prompt and binary attachments.
 //
-// テキスト 1 つと添付 n 件という、マルチモーダル呼び出しのほとんどを占める形に
-// 絞った、genai の型を伴わない生成の入口です。添付が無ければ attachments に nil を
-// 渡します（「プロンプト + GenerateOptions」の入口になります）。
+// It is the generation entry point without genai types, narrowed to the shape that makes up
+// most multimodal calls: one text and n attachments. If there are no attachments, pass nil
+// for attachments (it then serves as the "prompt + GenerateOptions" entry point).
 //
-// prompt が空でも添付があれば送信します（音声や画像だけを渡して解析させる用途）。
-// 両方が空の場合と、データを持つ添付に MIME type が無い場合はエラーを返します。
+// Even with an empty prompt, the request is sent if there are attachments (for passing only
+// audio or images to have them analysed).
+// It returns an error when both are empty, and when an attachment carrying data has no MIME type.
 func (c *Client) Generate(ctx context.Context, model string, prompt string, attachments []Attachment, opts GenerateOptions) (*Response, error) {
 	parts, err := attachmentParts(prompt, attachments)
 	if err != nil {
@@ -43,10 +44,10 @@ func (c *Client) Generate(ctx context.Context, model string, prompt string, atta
 	return c.generateParts(ctx, model, parts, opts)
 }
 
-// generateParts はマルチモーダルパーツからコンテンツを生成する共通経路です。
+// generateParts is the shared path for generating content from multimodal parts.
 //
-// 公開の入口は genai の型を伴わない GenerateText / Generate で、
-// genai.Part を直接受けるこの関数は公開しません（SDK の型を公開面に漏らさないため）。
+// The public entry points are GenerateText / Generate, which carry no genai types; this
+// function, which takes genai.Part directly, is not exported (to keep SDK types off the public surface).
 func (c *Client) generateParts(ctx context.Context, model string, parts []*genai.Part, opts GenerateOptions) (*Response, error) {
 	if err := validateGenerateInput(model, parts); err != nil {
 		return nil, err
@@ -75,11 +76,11 @@ func validateGenerateInput(model string, parts []*genai.Part) error {
 	return nil
 }
 
-// buildThinkingConfig は思考設定を組み立てます。
-// 何も指定がなければ nil を返します。常に送るとモデル既定の思考挙動を上書きしてしまうためです。
+// buildThinkingConfig builds the thinking configuration.
+// It returns nil when nothing is specified, because always sending it would override the model's default thinking behaviour.
 //
-// ThinkingLevel（段階指定）と ThinkingBudget（トークン数指定）は排他的な指定方法です。
-// 両方が設定された場合は、モデル非依存で移植性の高い ThinkingLevel を優先します。
+// ThinkingLevel (a level) and ThinkingBudget (a token count) are mutually exclusive ways to specify it.
+// When both are set, ThinkingLevel, which is model-independent and more portable, takes precedence.
 func buildThinkingConfig(opts GenerateOptions) *genai.ThinkingConfig {
 	hasLevel := opts.ThinkingLevel != "" && opts.ThinkingLevel != genai.ThinkingLevelUnspecified
 	if !hasLevel && opts.ThinkingBudget == nil && !opts.IncludeThoughts {
@@ -95,7 +96,7 @@ func buildThinkingConfig(opts GenerateOptions) *genai.ThinkingConfig {
 	return cfg
 }
 
-// applyResponseFormat は、レスポンスの MIME type・モダリティ・構造化出力スキーマを適用します。
+// applyResponseFormat applies the response MIME type, modalities and structured-output schema.
 func applyResponseFormat(genConfig *genai.GenerateContentConfig, opts GenerateOptions) {
 	if opts.ResponseMIMEType != "" {
 		genConfig.ResponseMIMEType = opts.ResponseMIMEType
@@ -106,8 +107,8 @@ func applyResponseFormat(genConfig *genai.GenerateContentConfig, opts GenerateOp
 			genConfig.ResponseModalities = []string{"IMAGE"}
 		}
 	}
-	// ResponseJSONSchema と ResponseSchema は排他。両方送るとどちらが効くか不定になるため、
-	// 新しい ResponseJSONSchema を優先して片方だけ送る。
+	// ResponseJSONSchema and ResponseSchema are mutually exclusive. Sending both leaves it undefined
+	// which one takes effect, so only the newer ResponseJSONSchema is sent.
 	switch {
 	case opts.ResponseJSONSchema != nil:
 		genConfig.ResponseJsonSchema = opts.ResponseJSONSchema
@@ -116,7 +117,7 @@ func applyResponseFormat(genConfig *genai.GenerateContentConfig, opts GenerateOp
 	}
 }
 
-// applyImageConfig は、画像生成 (Imagen/Nano Banana) 特有の設定を適用します。
+// applyImageConfig applies the settings specific to image generation (Imagen/Nano Banana).
 func applyImageConfig(genConfig *genai.GenerateContentConfig, opts GenerateOptions) {
 	if !opts.HasImageConfig() {
 		return
@@ -138,9 +139,9 @@ func applyImageConfig(genConfig *genai.GenerateContentConfig, opts GenerateOptio
 	}
 }
 
-// buildGenerateConfig は GenerateOptions を genai の生成設定へ変換します。
-// Client のメソッドにしないのは Client の状態に依存しないためで、
-// クライアント無しでテストできます。
+// buildGenerateConfig converts GenerateOptions into genai's generation config.
+// It is not a Client method because it does not depend on Client state, so it can be
+// tested without a client.
 func buildGenerateConfig(opts GenerateOptions) (*genai.GenerateContentConfig, error) {
 	genConfig := &genai.GenerateContentConfig{
 		SafetySettings:  opts.SafetySettings,
@@ -169,9 +170,9 @@ func buildGenerateConfig(opts GenerateOptions) (*genai.GenerateContentConfig, er
 	applyImageConfig(genConfig, opts)
 
 	if opts.OutputURIPrefix != "" {
-		// 書き込み先の不備は生成の後ではなく送る前に分かるので、ここで止める。
+		// A bad destination is known before sending rather than after generating, so stop here.
 		if !strings.HasPrefix(opts.OutputURIPrefix, "gs://") {
-			return nil, fmt.Errorf("%w (入力値: %q)", ErrInvalidOutputURIPrefix, opts.OutputURIPrefix)
+			return nil, fmt.Errorf("%w (got: %q)", ErrInvalidOutputURIPrefix, opts.OutputURIPrefix)
 		}
 		genConfig.GenerationOutputConfig = &genai.GenerationOutputConfig{OutputURIPrefix: opts.OutputURIPrefix}
 	}
@@ -179,29 +180,29 @@ func buildGenerateConfig(opts GenerateOptions) (*genai.GenerateContentConfig, er
 	return genConfig, nil
 }
 
-// generate は共通の API 呼び出しをカプセル化します。
-// リトライは genai SDK が内蔵のものを行います（設定は Config.retryOptions）。
-// Config.RequestTimeout が設定されている場合、リトライを含む呼び出し全体に適用されます
-// （SDK のリトライループは ctx.Err() を見るため、締切の外へは出ません）。
+// generate encapsulates the shared API call.
+// Retries are the genai SDK's built-in ones (configured by Config.retryOptions).
+// When Config.RequestTimeout is set, it applies to the whole call including retries
+// (the SDK's retry loop checks ctx.Err(), so it never runs past the deadline).
 func (c *Client) generate(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*Response, error) {
 	ctx, cancel := c.requestContext(ctx)
 	defer cancel()
 
 	resp, err := c.modelClient.GenerateContent(ctx, model, contents, config)
 	if err != nil {
-		return nil, fmt.Errorf("モデル %s の %s 呼び出しに失敗しました: %w", model, c.backend(), err)
+		return nil, fmt.Errorf("model %s %s call failed: %w", model, c.backend(), err)
 	}
 	return responseFromGenAI(resp, config.GenerationOutputConfig != nil)
 }
 
-// seedToPtrInt32 は *int64 を SDK 用の *int32 に変換します。
+// seedToPtrInt32 converts *int64 to the SDK's *int32.
 func seedToPtrInt32(s *int64) (*int32, error) {
 	if s == nil {
 		return nil, nil
 	}
 
 	if *s > math.MaxInt32 || *s < math.MinInt32 {
-		return nil, fmt.Errorf("%w (入力値: %d)", ErrInvalidSeed, *s)
+		return nil, fmt.Errorf("%w (got: %d)", ErrInvalidSeed, *s)
 	}
 
 	return new(int32(*s)), nil

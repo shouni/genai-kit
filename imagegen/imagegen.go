@@ -1,19 +1,18 @@
-// Package imagegen は、Vertex AI の画像モデルによる画像生成を実行します。
+// Package imagegen runs image generation with Vertex AI image models.
 //
-// 参照画像は gs:// URI（Request.Images / Request.References）と、呼び出し側が取得済みの
-// バイト列（Request.References）を受け取ります。gs:// は Vertex AI がモデル側で解決する
-// ため、取得もアップロードも転送も起きません。
+// Reference images are accepted as gs:// URIs (Request.Images / Request.References) and as
+// bytes the caller has already fetched (Request.References). gs:// is resolved by Vertex AI on
+// the model side, so nothing is fetched, uploaded or transferred.
 //
-// 取得はこのパッケージの仕事ではありません。http(s) の参照画像を扱う場合、呼び出し側が
-// 取得の経路・タイムアウト・サイズ上限を決めてバイト列にしてから References へ渡します。
-// 取得方法の選択肢を抽象化して抱えると、使わない依存（HTTP クライアント、キャッシュ、
-// 再圧縮）まで全員に配ることになるためです。Gemini File API を経由する経路はありません。
+// Fetching is not this package's job. For http(s) reference images, the caller decides the
+// fetch path, timeout and size limit, turns the image into bytes and then passes them in References.
+// Abstracting over the choice of fetch method would hand everyone dependencies they do not use
+// (an HTTP client, a cache, recompression). There is no path through the Gemini File API.
 //
-// 発射間隔・上限時間・重複排除といった呼び出しガードは持ちません。クォータは
-// プロジェクト単位で操作の種類ごとではないため、画像生成だけを絞ってもテキスト生成が
-// 同じクォータを食い尽くせてしまうからです。ガードは Generator を callguard で
-// デコレートし、テキスト生成と 1 つの Guard を共有する形でワークフロー層に置いて
-// ください。
+// It has no call guards such as a firing interval, a time limit or deduplication. Quota is
+// per project, not per kind of operation, so throttling image generation alone would still let
+// text generation use up the same quota. Put the guard in the workflow layer by decorating the
+// Generator with callguard and sharing one Guard with text generation.
 package imagegen
 
 import (
@@ -22,52 +21,52 @@ import (
 	"github.com/shouni/genai-kit/gemini"
 )
 
-// Generator は、利用側が依存する画像生成の窓口です。
+// Generator is the image generation entry point callers depend on.
 //
-// 意図的に 1 メソッドです。利用側のテスト用フェイクがこれ 1 つで書けるようにする
-// ためで、gemini.Generator が Generate だけを持つのと同じ理由です。
+// It deliberately has one method, so that a caller's test fake can be written with just this
+// one; the same reason gemini.Generator only has Generate.
 type Generator interface {
-	// Generate は、参照画像（0〜複数）と構成パラメータに基づいて 1 枚の画像を生成します。
+	// Generate generates one image based on reference images (zero or more) and composition parameters.
 	Generate(ctx context.Context, req Request) (*Response, error)
 }
 
-// Client がパッケージ公開インターフェースを満たすことをコンパイル時に保証します。
+// These assertions guarantee at compile time that Client satisfies the package's public interfaces.
 var _ Generator = (*Client)(nil)
 
-// Client は画像生成の実装です。
+// Client is the image generation implementation.
 //
-// 発射間隔・1 回あたりの上限時間・重複排除は持ちません。クォータはプロジェクト単位で
-// 操作の種類ごとではないため、ライブラリごとに独立したレート制限を持たせると合計が
-// クォータを超えます。ガードが要る場合は Client（Generator）を callguard で
-// デコレートし、テキスト生成と 1 つの Guard を共有する形でワークフロー層に置いて
-// ください。
+// It has no firing interval, per-call time limit or deduplication. Quota is per project, not
+// per kind of operation, so giving each library its own independent rate limit makes the total
+// exceed the quota. If a guard is needed, put it in the workflow layer by decorating the Client
+// (Generator) with callguard and sharing one Guard with text generation.
 type Client struct {
 	ai       gemini.Generator
 	autoSeed bool
 }
 
-// Option は Client の任意設定です。
+// Option is an optional Client setting.
 type Option func(*Client)
 
-// WithoutAutoSeed は、シード未指定のリクエストへの自動採番を無効にします。
+// WithoutAutoSeed disables automatic seeding of requests that do not specify a seed.
 //
-// 既定では、Seed が未指定の生成にはランダムなシードを採番してから送信します。
-// API 側にシード選択を委ねるとその値はレスポンスに含まれず、Response.UsedSeed が
-// 0 のまま記録されて同条件での再生成ができなくなるためです（0 は有効なシードなので、
-// 「未記録」と区別も付きません）。自動採番しても生成結果のランダム性は変わりません
-// — シードを選ぶのが API 側か生成側かの違いです。
+// By default, a generation without a Seed gets a random seed picked before sending.
+// If seed selection is left to the API, the value is not included in the response, so
+// Response.UsedSeed is recorded as 0 and regeneration under the same conditions becomes
+// impossible (0 is a valid seed, so it cannot be told apart from "not recorded" either).
+// Automatic seeding does not change the randomness of the result — the only difference is
+// whether the API or the generator picks the seed.
 //
-// このオプションは、シード管理を完全に呼び出し側で行う場合にのみ使ってください。
+// Use this option only when the caller manages seeds entirely itself.
 func WithoutAutoSeed() Option {
 	return func(c *Client) {
 		c.autoSeed = false
 	}
 }
 
-// New は Client を作成します。
+// New creates a Client.
 //
-// ai は gemini.Generator（Generate の 1 メソッド）で足ります。
-// テスト用フェイクもその 1 メソッドで書けます。
+// A gemini.Generator (the single Generate method) is all ai needs.
+// A test fake can be written with that one method too.
 //
 //	client, err := gemini.New(ctx, gemini.Config{ProjectID: "p", LocationID: "asia-northeast1"})
 //	images, err := imagegen.New(client)
@@ -85,8 +84,8 @@ func New(ai gemini.Generator, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
-// Generate は、参照画像（0〜複数）と構成パラメータに基づいて 1 枚の画像を生成します。
-// 打ち切りは呼び出し側の context にのみ従います。
+// Generate generates one image based on reference images (zero or more) and composition parameters.
+// Cancellation follows only the caller's context.
 func (c *Client) Generate(ctx context.Context, req Request) (*Response, error) {
 	prepared, err := c.prepare(req)
 	if err != nil {

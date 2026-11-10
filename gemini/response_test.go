@@ -9,8 +9,8 @@ import (
 )
 
 func TestExtractText(t *testing.T) {
-	t.Run("複数のテキストパートが連結されること", func(t *testing.T) {
-		// モデルは本文を複数パートに分割して返すことがあるため、連結が必要です。
+	t.Run("concatenates multiple text parts", func(t *testing.T) {
+		// Models sometimes split the body across several parts, so concatenation is needed.
 		resp := respWithParts(genai.FinishReasonStop,
 			&genai.Part{Text: "こんにちは"},
 			&genai.Part{Text: "世界"},
@@ -21,13 +21,13 @@ func TestExtractText(t *testing.T) {
 			t.Fatalf("extractText() error = %v", err)
 		}
 		if got != "こんにちは世界" {
-			t.Errorf("テキストが欠落しています: got %q", got)
+			t.Errorf("text is missing: got %q", got)
 		}
 	})
 
-	t.Run("思考パートが本文に混入しないこと", func(t *testing.T) {
-		// 思考機能が有効なモデルは思考サマリを本文より前に返します。
-		// 最初の非空テキストを返す実装では、本文ではなく思考サマリが返ります。
+	t.Run("thought parts do not leak into the body", func(t *testing.T) {
+		// Models with thinking enabled return the thought summary before the body.
+		// An implementation returning the first non-empty text would return the thought summary instead of the body.
 		resp := respWithParts(genai.FinishReasonStop,
 			&genai.Part{Text: "まず前提を整理する…", Thought: true},
 			&genai.Part{Text: "答えは42です"},
@@ -38,11 +38,11 @@ func TestExtractText(t *testing.T) {
 			t.Fatalf("extractText() error = %v", err)
 		}
 		if got != "答えは42です" {
-			t.Errorf("思考サマリが本文に混入しています: got %q", got)
+			t.Errorf("the thought summary leaked into the body: got %q", got)
 		}
 	})
 
-	t.Run("nil パートを飛ばすこと", func(t *testing.T) {
+	t.Run("skips nil parts", func(t *testing.T) {
 		resp := respWithParts(genai.FinishReasonStop, nil, &genai.Part{Text: "ok"})
 
 		got, err := extractText(resp)
@@ -54,20 +54,20 @@ func TestExtractText(t *testing.T) {
 		}
 	})
 
-	t.Run("空レスポンスは ErrEmptyResponse になること", func(t *testing.T) {
+	t.Run("an empty response becomes ErrEmptyResponse", func(t *testing.T) {
 		_, err := extractText(&genai.GenerateContentResponse{})
 
 		if !errors.Is(err, ErrEmptyResponse) {
 			t.Errorf("extractText() error = %v, want ErrEmptyResponse", err)
 		}
 		if errors.Is(err, ErrBlocked) {
-			t.Error("空レスポンスが ErrBlocked に分類されています")
+			t.Error("an empty response is classified as ErrBlocked")
 		}
 	})
 
-	// 入力そのものが弾かれると、候補が 0 件で PromptFeedback だけが付く。これを見ないと
-	// 「空のレスポンス」として理由なしに報告され、再試行しても無駄なことが伝わらない。
-	t.Run("入力のブロックは ErrBlocked に理由つきでなること", func(t *testing.T) {
+	// When the input itself is refused, there are zero candidates with only PromptFeedback attached.
+	// Without looking at it, the failure is reported as an "empty response" with no reason, and it is not conveyed that retrying is pointless.
+	t.Run("an input block becomes ErrBlocked with a reason", func(t *testing.T) {
 		resp := &genai.GenerateContentResponse{
 			PromptFeedback: &genai.GenerateContentResponsePromptFeedback{
 				BlockReason:        genai.BlockedReasonProhibitedContent,
@@ -90,10 +90,10 @@ func TestExtractText(t *testing.T) {
 		}
 	})
 
-	// genai v1.75.0 以降、自動継続の途中の回が弾かれると、SDK は前の回の候補から
-	// CONTINUATION を消し、PromptFeedback だけを残して統合します。候補があっても
-	// PromptFeedback を見ないと、途中までの本文が成功として返ってしまう。
-	t.Run("継続途中のブロックは部分テキストを返さず ErrBlocked になること", func(t *testing.T) {
+	// Since genai v1.75.0, when a hop in the middle of automatic continuation is refused, the SDK
+	// clears CONTINUATION from the earlier hop's candidate and merges keeping only the PromptFeedback.
+	// Even with a candidate present, not looking at PromptFeedback would return the partial body as a success.
+	t.Run("a block mid-continuation returns no partial text and becomes ErrBlocked", func(t *testing.T) {
 		resp := &genai.GenerateContentResponse{
 			Candidates: []*genai.Candidate{{
 				Content: &genai.Content{Parts: []*genai.Part{{Text: "途中までの本文"}}},
@@ -116,15 +116,15 @@ func TestExtractText(t *testing.T) {
 		}
 	})
 
-	t.Run("理由の無い PromptFeedback は空レスポンスのまま", func(t *testing.T) {
+	t.Run("PromptFeedback without a reason stays an empty response", func(t *testing.T) {
 		resp := &genai.GenerateContentResponse{PromptFeedback: &genai.GenerateContentResponsePromptFeedback{}}
 		if _, err := extractText(resp); !errors.Is(err, ErrEmptyResponse) {
 			t.Errorf("extractText() error = %v, want ErrEmptyResponse", err)
 		}
 	})
 
-	t.Run("nil の候補スロットは ErrEmptyResponse になること", func(t *testing.T) {
-		// 候補スロット自体もサーバー由来の値で nil があり得ます。
+	t.Run("a nil candidate slot becomes ErrEmptyResponse", func(t *testing.T) {
+		// The candidate slot itself is a value from the server and can be nil.
 		_, err := extractText(&genai.GenerateContentResponse{Candidates: []*genai.Candidate{nil}})
 
 		if !errors.Is(err, ErrEmptyResponse) {
@@ -132,7 +132,7 @@ func TestExtractText(t *testing.T) {
 		}
 	})
 
-	t.Run("ブロックは ErrBlocked と FinishReason を持つこと", func(t *testing.T) {
+	t.Run("a block carries ErrBlocked and the FinishReason", func(t *testing.T) {
 		resp := respWithParts(genai.FinishReasonSafety, &genai.Part{Text: "..."})
 
 		_, err := extractText(resp)
@@ -150,13 +150,13 @@ func TestExtractText(t *testing.T) {
 	})
 }
 
-// TestFinishReasonHasTwoUnsetValues は、終了理由が未設定のレスポンスをブロック扱い
-// しないことを検証します。
+// TestFinishReasonHasTwoUnsetValues checks that a response with no finish reason is not treated
+// as blocked.
 //
-// genai.FinishReason のゼロ値は "" で、SDK 定数 FinishReasonUnspecified
-// ("FINISH_REASON_UNSPECIFIED") とは別値です。サーバーは終了理由を含まない
-// レスポンスを返すことがあり、ここを取り違えると正常な応答が
-// 「ブロックされました」で失敗します。
+// genai.FinishReason's zero value is "", a different value from the SDK constant
+// FinishReasonUnspecified ("FINISH_REASON_UNSPECIFIED"). The server sometimes returns a response
+// with no finish reason, and getting this wrong makes a normal response fail as
+// "blocked".
 func TestFinishReasonHasTwoUnsetValues(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -164,12 +164,12 @@ func TestFinishReasonHasTwoUnsetValues(t *testing.T) {
 		wantBlocked bool
 		wantErr     error
 	}{
-		{"ゼロ値", "", false, nil},
+		{"zero value", "", false, nil},
 		{"FINISH_REASON_UNSPECIFIED", genai.FinishReasonUnspecified, false, nil},
 		{"STOP", genai.FinishReasonStop, false, nil},
-		// MAX_TOKENS は異常終了だが、対処が違うのでブロックとは別の番兵で返す。
+		// MAX_TOKENS is an abnormal end, but the remedy differs, so it is returned with a sentinel other than blocked.
 		{"MAX_TOKENS", genai.FinishReasonMaxTokens, true, ErrTruncated},
-		// CONTINUATION は途中結果。自動継続を切ったときに届き、本文が途中までなのは MAX_TOKENS と同じ。
+		// CONTINUATION is a partial result. It arrives when automatic continuation is off, and the body is incomplete just as with MAX_TOKENS.
 		{"CONTINUATION", genai.FinishReasonContinuation, true, ErrTruncated},
 		{"SAFETY", genai.FinishReasonSafety, true, ErrBlocked},
 		{"RECITATION", genai.FinishReasonRecitation, true, ErrBlocked},
@@ -199,7 +199,7 @@ func TestFinishReasonHasTwoUnsetValues(t *testing.T) {
 }
 
 func TestExtractThoughts(t *testing.T) {
-	t.Run("思考パートのみを連結すること", func(t *testing.T) {
+	t.Run("concatenates only thought parts", func(t *testing.T) {
 		resp := respWithParts(genai.FinishReasonStop,
 			&genai.Part{Text: "思考A", Thought: true},
 			&genai.Part{Text: "本文"},
@@ -211,24 +211,24 @@ func TestExtractThoughts(t *testing.T) {
 		}
 	})
 
-	t.Run("思考がなければ空文字列", func(t *testing.T) {
+	t.Run("empty string when there are no thoughts", func(t *testing.T) {
 		resp := respWithParts(genai.FinishReasonStop, &genai.Part{Text: "本文"})
 
 		if got := extractThoughts(resp); got != "" {
-			t.Errorf("extractThoughts() = %q, want 空", got)
+			t.Errorf("extractThoughts() = %q, want empty", got)
 		}
 	})
 
-	t.Run("nil レスポンスでも panic しないこと", func(t *testing.T) {
+	t.Run("does not panic on a nil response", func(t *testing.T) {
 		if got := extractThoughts(nil); got != "" {
-			t.Errorf("extractThoughts(nil) = %q, want 空", got)
+			t.Errorf("extractThoughts(nil) = %q, want empty", got)
 		}
 	})
 }
 
-// TestResponseAttachmentsCarryMIMETypes は、返却されたインラインデータが MIME type
-// 込みで取り出せることを検証します。Images / Audios はバイト列だけなので、これが
-// 無いと保存時の拡張子や Content-Type を決められません。
+// TestResponseAttachmentsCarryMIMETypes checks that returned inline data can be extracted with its
+// MIME type. Images / Audios are bytes only, so without this the extension or Content-Type for
+// saving could not be decided.
 func TestResponseAttachmentsCarryMIMETypes(t *testing.T) {
 	resp, err := responseFromGenAI(respWithParts(genai.FinishReasonStop,
 		&genai.Part{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("png")}},
@@ -247,19 +247,19 @@ func TestResponseAttachmentsCarryMIMETypes(t *testing.T) {
 	if resp.Attachments[1].MIMEType != "audio/mpeg" {
 		t.Errorf("Attachments[1].MIMEType = %q", resp.Attachments[1].MIMEType)
 	}
-	// Images / Audios は Attachments の部分集合として振り分けられる。
+	// Images / Audios are sorted out as subsets of Attachments.
 	if len(resp.Images) != 1 || len(resp.Audios) != 1 {
-		t.Errorf("Images = %d, Audios = %d, want 各 1 件", len(resp.Images), len(resp.Audios))
+		t.Errorf("Images = %d, Audios = %d, want one each", len(resp.Images), len(resp.Audios))
 	}
 }
 
-// TestResponseAttachmentsCarryOutputURIs は、OutputURIPrefix の指定で GCS に書き込まれた
-// メディアが FileData の URI として Attachments に残ることを検証します。InlineData しか
-// 見ないと、生成物がエラーも無く丸ごと消えます。
+// TestResponseAttachmentsCarryOutputURIs checks that media written to GCS because OutputURIPrefix
+// was specified stays in Attachments as FileData URIs. Looking only at InlineData would make the
+// output vanish entirely without an error.
 func TestResponseAttachmentsCarryOutputURIs(t *testing.T) {
 	resp, err := responseFromGenAI(respWithParts(genai.FinishReasonStop,
 		&genai.Part{FileData: &genai.FileData{FileURI: "gs://bucket/out/1.png", MIMEType: "image/png"}},
-		&genai.Part{FileData: &genai.FileData{MIMEType: "image/png"}}, // URI の無い FileData は落とす
+		&genai.Part{FileData: &genai.FileData{MIMEType: "image/png"}}, // FileData without a URI is dropped
 		&genai.Part{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("png")}},
 	), true)
 	if err != nil {
@@ -267,21 +267,21 @@ func TestResponseAttachmentsCarryOutputURIs(t *testing.T) {
 	}
 
 	if len(resp.Attachments) != 2 {
-		t.Fatalf("Attachments = %+v, want 2 件", resp.Attachments)
+		t.Fatalf("Attachments = %+v, want 2 entries", resp.Attachments)
 	}
 	got := resp.Attachments[0]
 	if got.URI != "gs://bucket/out/1.png" || got.MIMEType != "image/png" || len(got.Data) != 0 {
-		t.Errorf("Attachments[0] = %+v, want URI と MIME type だけ", got)
+		t.Errorf("Attachments[0] = %+v, want only the URI and MIME type", got)
 	}
-	// Images はバイト列を持つ要素だけを集める。URI の要素で空のバイト列を積まない。
+	// Images collects only elements that carry bytes. URI elements do not add empty bytes.
 	if len(resp.Images) != 1 || string(resp.Images[0]) != "png" {
-		t.Errorf("Images = %q, want インラインの 1 件だけ", resp.Images)
+		t.Errorf("Images = %q, want only the one inline entry", resp.Images)
 	}
 }
 
-// TestResponseIgnoresFileDataWithoutOutputURIPrefix は、OutputURIPrefix を送っていない
-// リクエストでは FileData を拾わないことを検証します。拾うと、以前はデータ無しのエラーに
-// なった応答が、Data の空な要素として imagegen / lyria を素通りします。
+// TestResponseIgnoresFileDataWithoutOutputURIPrefix checks that FileData is not picked up for
+// requests that did not send OutputURIPrefix. Picking it up would let a response that used to be
+// a no-data error pass through imagegen / lyria as an element with an empty Data.
 func TestResponseIgnoresFileDataWithoutOutputURIPrefix(t *testing.T) {
 	resp, err := responseFromGenAI(respWithParts(genai.FinishReasonStop,
 		&genai.Part{FileData: &genai.FileData{FileURI: "gs://bucket/out/1.png", MIMEType: "image/png"}},
@@ -290,12 +290,12 @@ func TestResponseIgnoresFileDataWithoutOutputURIPrefix(t *testing.T) {
 		t.Fatalf("responseFromGenAI() error = %v", err)
 	}
 	if len(resp.Attachments) != 0 {
-		t.Errorf("Attachments = %+v, want 0 件", resp.Attachments)
+		t.Errorf("Attachments = %+v, want 0 entries", resp.Attachments)
 	}
 }
 
-// TestResponseFromGenAISkipsNilParts は、レスポンス中の nil パートで panic しないことを
-// 検証します。パートはサーバー由来なので、こちらの入力検証では排除できません。
+// TestResponseFromGenAISkipsNilParts checks that nil parts in the response do not cause a panic.
+// Parts come from the server, so our own input validation cannot rule them out.
 func TestResponseFromGenAISkipsNilParts(t *testing.T) {
 	got, err := responseFromGenAI(respWithParts(genai.FinishReasonStop,
 		nil,
@@ -322,9 +322,8 @@ func TestResponseFromGenAISkipsNilParts(t *testing.T) {
 	}
 }
 
-// TestResponseFromGenAIIgnoresUnknownMIMETypes は、画像でも音声でもないインライン
-// データが Attachments には残り、Images / Audios には振り分けられないことを
-// 検証します。
+// TestResponseFromGenAIIgnoresUnknownMIMETypes checks that inline data that is neither image nor
+// audio stays in Attachments and is not sorted into Images / Audios.
 func TestResponseFromGenAIIgnoresUnknownMIMETypes(t *testing.T) {
 	got, err := responseFromGenAI(respWithParts(genai.FinishReasonStop,
 		&genai.Part{InlineData: &genai.Blob{MIMEType: "application/pdf", Data: []byte("pdf")}},
@@ -334,21 +333,21 @@ func TestResponseFromGenAIIgnoresUnknownMIMETypes(t *testing.T) {
 	}
 
 	if len(got.Attachments) != 1 || got.Attachments[0].MIMEType != "application/pdf" {
-		t.Errorf("Attachments = %+v, want PDF が残ること", got.Attachments)
+		t.Errorf("Attachments = %+v, want the PDF kept", got.Attachments)
 	}
 	if len(got.Images) != 0 || len(got.Audios) != 0 {
-		t.Errorf("Images = %d, Audios = %d, want いずれも 0", len(got.Images), len(got.Audios))
+		t.Errorf("Images = %d, Audios = %d, want both 0", len(got.Images), len(got.Audios))
 	}
 }
 
 func TestTokenUsageFromMetadata(t *testing.T) {
-	t.Run("メタデータが無ければ nil", func(t *testing.T) {
+	t.Run("nil when there is no metadata", func(t *testing.T) {
 		if got := tokenUsageFromMetadata(nil); got != nil {
 			t.Errorf("tokenUsageFromMetadata(nil) = %+v, want nil", got)
 		}
 	})
 
-	t.Run("思考トークンを含めて写すこと", func(t *testing.T) {
+	t.Run("copies including thought tokens", func(t *testing.T) {
 		got := tokenUsageFromMetadata(&genai.GenerateContentResponseUsageMetadata{
 			PromptTokenCount:     10,
 			CandidatesTokenCount: 5,

@@ -11,11 +11,11 @@ import (
 	"google.golang.org/genai"
 )
 
-// skipWithoutGCPCredentials は、Application Default Credentials が利用できない環境
-// （CI ランナーなど）でテストをスキップします。
+// skipWithoutGCPCredentials skips the test in environments where Application Default
+// Credentials are not available (such as CI runners).
 //
-// genai の UseDefaultCredentials は cloud-platform スコープで ADC を検出するため、
-// 同じ検出器を同じスコープで呼んで前提条件だけを確かめます。
+// genai's UseDefaultCredentials detects ADC with the cloud-platform scope, so this calls the
+// same detector with the same scope to check only the precondition.
 func skipWithoutGCPCredentials(t *testing.T) {
 	t.Helper()
 
@@ -23,7 +23,7 @@ func skipWithoutGCPCredentials(t *testing.T) {
 		Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"},
 	})
 	if err != nil {
-		t.Skipf("ADC が見つからないため、このテストをスキップします: %v", err)
+		t.Skipf("skipping this test because ADC was not found: %v", err)
 	}
 }
 
@@ -34,41 +34,41 @@ func TestConfigValidate(t *testing.T) {
 		want error
 	}{
 		{
-			name: "正常系: ProjectID と LocationID が揃っている",
+			name: "valid: both ProjectID and LocationID set",
 			cfg:  Config{ProjectID: "my-project", LocationID: "asia-northeast1"},
 			want: nil,
 		},
 		{
-			// 設定を渡し忘れた、という間違い。
-			name: "異常系: どちらも空",
+			// The mistake of forgetting to pass the config.
+			name: "invalid: both empty",
 			cfg:  Config{},
 			want: ErrConfigRequired,
 		},
 		{
-			// 環境変数の片方が空だった、という別の間違い。
-			name: "異常系: ProjectID のみ",
+			// The different mistake of one environment variable being empty.
+			name: "invalid: ProjectID only",
 			cfg:  Config{ProjectID: "my-project"},
 			want: ErrIncompleteVertexConfig,
 		},
 		{
-			name: "異常系: LocationID のみ",
+			name: "invalid: LocationID only",
 			cfg:  Config{LocationID: "asia-northeast1"},
 			want: ErrIncompleteVertexConfig,
 		},
 		{
-			name: "正常系: APIKey のみ",
+			name: "valid: APIKey only",
 			cfg:  Config{APIKey: "key"},
 			want: nil,
 		},
 		{
-			// どちらを使うか決められないため、黙って一方を選ばずに落とす。
-			name: "異常系: APIKey と Vertex AI の併用",
+			// There is no way to decide which to use, so fail rather than silently picking one.
+			name: "invalid: APIKey together with Vertex AI",
 			cfg:  Config{ProjectID: "my-project", LocationID: "asia-northeast1", APIKey: "key"},
 			want: ErrExclusiveConfig,
 		},
 		{
-			// 書きかけの Vertex 設定より、併用そのものを先に知らせる。
-			name: "異常系: APIKey と書きかけの Vertex 設定",
+			// Report the combination itself before a half-written Vertex config.
+			name: "invalid: APIKey with a half-written Vertex config",
 			cfg:  Config{ProjectID: "my-project", APIKey: "key"},
 			want: ErrExclusiveConfig,
 		},
@@ -90,8 +90,8 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-// TestConfigToClientConfig は、設定からクライアント設定が組み上がることを検証します。
-// APIKey を指定した場合だけ Gemini API バックエンドへ切り替わります。
+// TestConfigToClientConfig checks that a client config is built from the configuration.
+// Only when APIKey is specified does it switch to the Gemini API backend.
 func TestConfigToClientConfig(t *testing.T) {
 	t.Run("Vertex AI", func(t *testing.T) {
 		got, err := Config{ProjectID: "proj-v", LocationID: "loc-v"}.toClientConfig()
@@ -105,12 +105,12 @@ func TestConfigToClientConfig(t *testing.T) {
 		if got.Backend != genai.BackendVertexAI {
 			t.Errorf("Backend = %v, want Vertex AI", got.Backend)
 		}
-		// HTTPClient を渡していないので、ADC の検出は SDK 側に委ねられる。
+		// No HTTPClient was passed, so ADC detection is left to the SDK.
 		if got.HTTPClient != nil {
-			t.Errorf("HTTPClient = %+v, want nil (SDK の既定に委ねる)", got.HTTPClient)
+			t.Errorf("HTTPClient = %+v, want nil (left to the SDK default)", got.HTTPClient)
 		}
 		if got.HTTPOptions.RetryOptions == nil {
-			t.Error("RetryOptions がクライアント設定に載っていません")
+			t.Error("RetryOptions are not on the client config")
 		}
 	})
 
@@ -126,22 +126,22 @@ func TestConfigToClientConfig(t *testing.T) {
 		if got.Backend != genai.BackendGeminiAPI {
 			t.Errorf("Backend = %v, want Gemini API", got.Backend)
 		}
-		// Vertex AI の項目を巻き込まないこと。載せると SDK 側の判定を惑わせる。
+		// Vertex AI fields must not be included; they would confuse the SDK's decision.
 		if got.Project != "" || got.Location != "" {
-			t.Errorf("project/location = %q/%q, want いずれも空", got.Project, got.Location)
+			t.Errorf("project/location = %q/%q, want both empty", got.Project, got.Location)
 		}
 		if got.HTTPOptions.RetryOptions == nil {
-			t.Error("RetryOptions がクライアント設定に載っていません")
+			t.Error("RetryOptions are not on the client config")
 		}
 	})
 }
 
-// TestToClientConfigKeepsSuppliedHTTPClientForAPIKey は、API キー経路で HTTPClient を
-// 渡しても ADC の付与を試みないことを検証します。
+// TestToClientConfigKeepsSuppliedHTTPClientForAPIKey checks that passing an HTTPClient on the
+// API key path does not try to attach ADC.
 //
-// Gemini API の認証はキーのヘッダ付与で、Transport には依存しません。ここで
-// UseDefaultCredentials を呼ぶと、ADC の無い環境（API キーだけを持つ実行環境が
-// まさにそれです）でクライアントの生成そのものが失敗します。
+// Gemini API authentication adds a key header and does not depend on the Transport. Calling
+// UseDefaultCredentials here would make creating the client itself fail in environments without
+// ADC (which is exactly what an environment holding only an API key is).
 func TestToClientConfigKeepsSuppliedHTTPClientForAPIKey(t *testing.T) {
 	supplied := &http.Client{Timeout: 42 * time.Second}
 
@@ -151,34 +151,34 @@ func TestToClientConfigKeepsSuppliedHTTPClientForAPIKey(t *testing.T) {
 	}
 
 	if got.HTTPClient == nil {
-		t.Fatal("HTTPClient がクライアント設定に載っていません")
+		t.Fatal("HTTPClient is not on the client config")
 	}
 	if got.HTTPClient == supplied {
-		t.Error("呼び出し側のインスタンスがそのまま使われています（複製すること）")
+		t.Error("the caller's instance is used as is (it should be copied)")
 	}
 	if got.HTTPClient.Timeout != supplied.Timeout {
 		t.Errorf("Timeout = %v, want %v", got.HTTPClient.Timeout, supplied.Timeout)
 	}
 	if got.HTTPClient.Transport != nil {
-		t.Errorf("Transport = %+v, want nil (API キー経路では認証情報を付けない)", got.HTTPClient.Transport)
+		t.Errorf("Transport = %+v, want nil (no credentials are attached on the API key path)", got.HTTPClient.Transport)
 	}
 }
 
 func TestConfigRetryOptions(t *testing.T) {
-	t.Run("既定値が適用されること", func(t *testing.T) {
+	t.Run("applies the defaults", func(t *testing.T) {
 		got := Config{}.retryOptions()
 		if got == nil {
-			t.Fatal("retryOptions() = nil, want 既定値つきの設定")
+			t.Fatal("retryOptions() = nil, want a config with defaults")
 		}
 		if *got.Attempts != int32(DefaultMaxRetries)+1 {
-			t.Errorf("Attempts = %v, want %v（初回を含む総試行回数）", *got.Attempts, DefaultMaxRetries+1)
+			t.Errorf("Attempts = %v, want %v (total attempts including the first)", *got.Attempts, DefaultMaxRetries+1)
 		}
 		if *got.InitialDelay != DefaultInitialDelay.Seconds() || *got.MaxDelay != DefaultMaxDelay.Seconds() {
-			t.Errorf("待ち時間の既定値が適用されていません: %+v", got)
+			t.Errorf("the default delays are not applied: %+v", got)
 		}
 	})
 
-	t.Run("設定値で上書きされること", func(t *testing.T) {
+	t.Run("overridden by the configured values", func(t *testing.T) {
 		got := Config{
 			MaxRetries:   5,
 			InitialDelay: 10 * time.Second,
@@ -186,31 +186,31 @@ func TestConfigRetryOptions(t *testing.T) {
 		}.retryOptions()
 
 		if *got.Attempts != 6 {
-			t.Errorf("Attempts = %v, want 6（初回 + リトライ 5 回）", *got.Attempts)
+			t.Errorf("Attempts = %v, want 6 (first attempt + 5 retries)", *got.Attempts)
 		}
 		if *got.InitialDelay != 10 || *got.MaxDelay != 60 {
-			t.Errorf("待ち時間が正しく適用されていません: %+v", got)
+			t.Errorf("the delays are not applied correctly: %+v", got)
 		}
 	})
 
-	// SDK の既定ジッタ（U(0, 1秒) の加算）は InitialDelay が数十秒だとほぼ効かないため、
-	// 初期間隔に比例した幅を明示します。
-	t.Run("ジッタが初期間隔の半分になること", func(t *testing.T) {
+	// The SDK's default jitter (adding U(0, 1s)) has almost no effect when InitialDelay is tens of
+	// seconds, so a width proportional to the initial delay is set explicitly.
+	t.Run("jitter is half the initial delay", func(t *testing.T) {
 		got := Config{InitialDelay: 60 * time.Second}.retryOptions()
 		if *got.Jitter != 30 {
 			t.Errorf("Jitter = %v, want 30", *got.Jitter)
 		}
 	})
 
-	// nil は SDK 側で「1 回だけ実行」を意味します。値型の MaxRetries では
-	// ゼロ値と「リトライしない」を区別できないため、専用のフラグで表します。
-	t.Run("DisableRetry で nil になること", func(t *testing.T) {
+	// nil means "run exactly once" to the SDK. A value-typed MaxRetries cannot tell the zero value
+	// apart from "do not retry", so a dedicated flag expresses it.
+	t.Run("DisableRetry gives nil", func(t *testing.T) {
 		if got := (Config{DisableRetry: true}).retryOptions(); got != nil {
 			t.Errorf("retryOptions() = %+v, want nil", got)
 		}
 	})
 
-	t.Run("MaxRetries の 0 は未設定として既定値へ倒すこと", func(t *testing.T) {
+	t.Run("a MaxRetries of 0 counts as unset and falls back to the default", func(t *testing.T) {
 		got := Config{MaxRetries: 0}.retryOptions()
 		if *got.Attempts != int32(DefaultMaxRetries)+1 {
 			t.Errorf("Attempts = %v, want %v", *got.Attempts, DefaultMaxRetries+1)
@@ -218,16 +218,16 @@ func TestConfigRetryOptions(t *testing.T) {
 	})
 }
 
-// TestAttemptsFromSaturates は、int32 に収まらないリトライ回数で総試行回数が
-// 負に回り込まないことを検証します。回り込むと SDK が 1 回も実行しません。
+// TestAttemptsFromSaturates checks that a retry count that does not fit in int32 does not wrap
+// the total attempt count around to negative. If it wrapped, the SDK would not run even once.
 func TestAttemptsFromSaturates(t *testing.T) {
 	tests := []struct {
 		name       string
 		maxRetries uint
 		want       int32
 	}{
-		{"通常の値は +1 されること", 3, 4},
-		{"int32 の上限を超える指定は飽和すること", math.MaxUint32, math.MaxInt32},
+		{"a normal value gets +1", 3, 4},
+		{"a value beyond the int32 maximum saturates", math.MaxUint32, math.MaxInt32},
 	}
 
 	for _, tt := range tests {
@@ -239,9 +239,9 @@ func TestAttemptsFromSaturates(t *testing.T) {
 	}
 }
 
-// TestNoRetryHTTPOptions は、リクエスト単位でリトライを打ち消す設定を検証します。
-// genai はリクエスト側の RetryOptions が非 nil のときだけクライアント設定を
-// 置き換えるため、打ち消しには nil ではなく Attempts=1 を渡す必要があります。
+// TestNoRetryHTTPOptions checks the setting that cancels out retries per request.
+// genai replaces the client config with the request's RetryOptions only when they are non-nil,
+// so cancelling them out requires passing Attempts=1 rather than nil.
 func TestNoRetryHTTPOptions(t *testing.T) {
 	got := noRetryHTTPOptions()
 	if got.RetryOptions == nil || *got.RetryOptions.Attempts != 1 {
@@ -249,13 +249,13 @@ func TestNoRetryHTTPOptions(t *testing.T) {
 	}
 }
 
-// TestToClientConfigAttachesCredentialsToSuppliedHTTPClient は、HTTPClient を指定しても
-// Vertex AI の認証が効くことを検証します。
+// TestToClientConfigAttachesCredentialsToSuppliedHTTPClient checks that Vertex AI authentication
+// works even when an HTTPClient is specified.
 //
-// genai は ClientConfig.HTTPClient が非 nil だと ADC の検出をスキップし、渡された
-// クライアントを認証ヘッダ無しで使います。そのため素の &http.Client{Timeout: ...} を
-// 渡すと全リクエストが 401 (CREDENTIALS_MISSING) になります。実際にこれで本番が
-// 停止したため、Transport が差し替えられている（＝認証が付いている）ことを確認します。
+// When ClientConfig.HTTPClient is non-nil, genai skips ADC detection and uses the passed client
+// without an auth header. So passing a plain &http.Client{Timeout: ...} makes every request fail
+// with 401 (CREDENTIALS_MISSING). This actually took production down, so the test checks that the
+// Transport has been replaced (that is, that authentication is attached).
 func TestToClientConfigAttachesCredentialsToSuppliedHTTPClient(t *testing.T) {
 	skipWithoutGCPCredentials(t)
 
@@ -267,24 +267,24 @@ func TestToClientConfigAttachesCredentialsToSuppliedHTTPClient(t *testing.T) {
 		t.Fatalf("toClientConfig() error = %v", err)
 	}
 	if got.HTTPClient == nil {
-		t.Fatal("HTTPClient = nil, want 渡したクライアント")
+		t.Fatal("HTTPClient = nil, want the client that was passed")
 	}
 	if got.HTTPClient.Timeout != 42*time.Second {
-		t.Errorf("Timeout = %v, want 指定値が残ること", got.HTTPClient.Timeout)
+		t.Errorf("Timeout = %v, want the specified value kept", got.HTTPClient.Timeout)
 	}
 	if got.HTTPClient.Transport == nil {
-		t.Error("Transport = nil, want 認証ミドルウェアが付くこと")
+		t.Error("Transport = nil, want the auth middleware attached")
 	}
-	// 呼び出し側のインスタンスは書き換えない（他所で使い回されている可能性がある）。
+	// The caller's instance is not modified (it may be reused elsewhere).
 	if supplied.Transport != nil {
-		t.Error("呼び出し側の http.Client が書き換えられています。複製すべきです")
+		t.Error("the caller's http.Client was modified; it should be copied")
 	}
 	if got.HTTPClient == supplied {
-		t.Error("HTTPClient が呼び出し側のインスタンスそのものです。複製すべきです")
+		t.Error("HTTPClient is the caller's instance itself; it should be copied")
 	}
 }
 
-// 402 のような課金のエラーは経路で原因が違うため、エラー文の経路名を取り違えないこと。
+// Billing errors such as 402 have different causes depending on the path, so the path name in the error message must not be mixed up.
 func TestConfigBackendName(t *testing.T) {
 	if got := (Config{APIKey: "k"}).backendName(); got != "Gemini API" {
 		t.Errorf("APIKey: got %q, want Gemini API", got)

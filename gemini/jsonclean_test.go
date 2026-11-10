@@ -15,69 +15,69 @@ func TestCleanJSONResponse(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "そのまま解釈できる JSON",
+			name:  "JSON that parses as is",
 			input: `{"title":"test"}`,
 			want:  `{"title":"test"}`,
 		},
 		{
-			name:  "Markdown のフェンスで包まれている",
+			name:  "wrapped in a Markdown fence",
 			input: "```json\n{\"title\":\"test\"}\n```",
 			want:  `{"title":"test"}`,
 		},
 		{
-			name:  "前後に説明文が付いている",
+			name:  "explanation before and after",
 			input: `Here is the JSON: {"title":"test"} done.`,
 			want:  `{"title":"test"}`,
 		},
 		{
-			name:  "入れ子の JSON",
+			name:  "nested JSON",
 			input: `{"a":{"b":"c"}}`,
 			want:  `{"a":{"b":"c"}}`,
 		},
 		{
-			name:  "直せない入力はそのまま返す",
+			name:  "returns unfixable input as is",
 			input: `{"unclosed"`,
 			want:  `{"unclosed"`,
 		},
 		{
-			name:  "括弧が無ければそのまま返す",
+			name:  "returns as is when there are no brackets",
 			input: `no json here`,
 			want:  `no json here`,
 		},
 		{
-			name:  "取り出した先が壊れていればそのまま返す",
+			name:  "returns as is when the extracted value is broken",
 			input: `prefix {broken json} suffix`,
 			want:  `prefix {broken json} suffix`,
 		},
 		{
-			name:  "閉じ括弧の代わりに ')' で閉じている",
+			name:  "closed with ')' instead of a closing bracket",
 			input: "{\"title\":\"test\",\"narrative\":\"hello\")",
 			want:  `{"title":"test","narrative":"hello"}`,
 		},
 		{
-			name:  "閉じ括弧の誤りと末尾の空白",
+			name:  "wrong closing bracket and trailing whitespace",
 			input: "{\"title\":\"test\")\n",
 			want:  `{"title":"test"}`,
 		},
 		{
-			// 本番障害の実パターン: 完結した JSON の後に余分な '}' と本文の断片が続く。
-			name:  "完結した JSON の後に余分な括弧と本文",
+			// A real pattern from a production incident: an extra '}' and a fragment of the body follow a complete JSON value.
+			name:  "extra brackets and body text after complete JSON",
 			input: "{\n  \"title\": \"調和の翼\",\n  \"narrative\": \"王道アニソン。\"\n}\n}\nアニソンファンタジー。\"\n})",
 			want:  "{\n  \"title\": \"調和の翼\",\n  \"narrative\": \"王道アニソン。\"\n}",
 		},
 		{
-			name:  "末尾に説明文だけが続く",
+			name:  "only an explanation follows",
 			input: `{"title":"test"} これは補足の説明です。`,
 			want:  `{"title":"test"}`,
 		},
 		{
-			// 文字列リテラルの中の括弧を数えてしまうと、ここで切り出しを誤ります。
-			name:  "文字列の中に括弧がある",
+			// Counting brackets inside string literals would extract the wrong span here.
+			name:  "brackets inside a string",
 			input: `{"lyrics":"[Verse]\n光 {影} 空"} garbage }`,
 			want:  `{"lyrics":"[Verse]\n光 {影} 空"}`,
 		},
 		{
-			name:  "トップレベルが配列",
+			name:  "top level is an array",
 			input: "前置き [1,2,3] 後置き",
 			want:  `[1,2,3]`,
 		},
@@ -94,10 +94,10 @@ func TestCleanJSONResponse(t *testing.T) {
 	}
 }
 
-// TestCleanJSONResponseRepairsBrokenStrings は、文字列リテラルの中の崩れを補修する
-// ことを検証します。構造化出力を指定していても起こり、応答を返しきったあとの崩れ
-// なので API の再試行では直りません。台本の抜粋・歌詞・台詞のように複数行の本文を
-// JSON に載せる用途で出ます。
+// TestCleanJSONResponseRepairsBrokenStrings checks that breakage inside string literals is
+// repaired. It happens even with structured output specified, and since the breakage occurs
+// after the response has been returned in full, an API retry does not fix it. It shows up when
+// a multi-line body, such as a script excerpt, lyrics or dialogue, is carried in JSON.
 func TestCleanJSONResponseRepairsBrokenStrings(t *testing.T) {
 	t.Parallel()
 
@@ -107,38 +107,38 @@ func TestCleanJSONResponseRepairsBrokenStrings(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "文字列の中の生の改行",
+			name:  "raw newline inside a string",
 			input: "{\"excerpt\":\"1行目\n2行目\"}",
 			want:  `{"excerpt":"1行目\n2行目"}`,
 		},
 		{
-			name:  "文字列の中の生のタブ",
+			name:  "raw tab inside a string",
 			input: "{\"code\":\"if x:\n\tpass\"}",
 			want:  `{"code":"if x:\n\tpass"}`,
 		},
 		{
-			name:  "文字列の中の裸のバックスラッシュ",
+			name:  "bare backslash inside a string",
 			input: `{"pattern":"\d+件"}`,
 			want:  `{"pattern":"\\d+件"}`,
 		},
 		{
-			// 正しいエスケープを 1 バイトずつ見ると、\" を文字列の終わりと取り違えます。
-			name:  "正しいエスケープはバックスラッシュ補修を生き延びる",
+			// Looking at valid escapes one byte at a time would mistake \" for the end of the string.
+			name:  "valid escapes survive the backslash repair",
 			input: `{"quote":"彼は\"はい\"と言った\d"}`,
 			want:  `{"quote":"彼は\"はい\"と言った\\d"}`,
 		},
 		{
-			name:  "フェンスの中に生の改行",
+			name:  "raw newline inside a fence",
 			input: "```json\n{\"lyrics\":\"A\nB\"}\n```",
 			want:  `{"lyrics":"A\nB"}`,
 		},
 		{
-			name:  "生の改行と末尾の説明文",
+			name:  "raw newline and a trailing explanation",
 			input: "{\"a\":\"x\ny\"} 以上です。",
 			want:  `{"a":"x\ny"}`,
 		},
 		{
-			name:  "短い表記の無い制御文字は \\u エスケープになる",
+			name:  "control characters without a short form become \\u escapes",
 			input: "{\"a\":\"\x00\"}",
 			want:  `{"a":"\u0000"}`,
 		},
@@ -153,14 +153,14 @@ func TestCleanJSONResponseRepairsBrokenStrings(t *testing.T) {
 				t.Errorf("CleanJSONResponse() = %q, want %q", got, tt.want)
 			}
 			if !json.Valid([]byte(got)) {
-				t.Errorf("補修後は妥当な JSON である必要があります: %q", got)
+				t.Errorf("the repaired result must be valid JSON: %q", got)
 			}
 		})
 	}
 }
 
-// TestCleanJSONResponseNeverWorsens は、直せない入力を悪化させないことを検証します。
-// 呼び出し側のエラーメッセージが元の壊れ方を指したままになるようにするためです。
+// TestCleanJSONResponseNeverWorsens checks that unfixable input is not made worse.
+// This keeps the caller's error message pointing at the original breakage.
 func TestCleanJSONResponseNeverWorsens(t *testing.T) {
 	t.Parallel()
 
@@ -176,14 +176,14 @@ func TestCleanJSONResponseNeverWorsens(t *testing.T) {
 			t.Parallel()
 
 			if got := CleanJSONResponse(in); got != in {
-				t.Errorf("CleanJSONResponse(%q) = %q, want 入力のまま", in, got)
+				t.Errorf("CleanJSONResponse(%q) = %q, want the input unchanged", in, got)
 			}
 		})
 	}
 }
 
-// TestCleanJSONResponseLeavesValidInputAlone は、解釈できる入力を 1 バイトも
-// 変えないことを検証します。整形に使われた改行やインデントも保ちます。
+// TestCleanJSONResponseLeavesValidInputAlone checks that input that parses is not changed by
+// a single byte. Newlines and indentation used for formatting are preserved too.
 func TestCleanJSONResponseLeavesValidInputAlone(t *testing.T) {
 	t.Parallel()
 
@@ -200,18 +200,18 @@ func TestCleanJSONResponseLeavesValidInputAlone(t *testing.T) {
 			t.Parallel()
 
 			if got := CleanJSONResponse(in); got != in {
-				t.Errorf("CleanJSONResponse(%q) = %q, want 入力のまま", in, got)
+				t.Errorf("CleanJSONResponse(%q) = %q, want the input unchanged", in, got)
 			}
 		})
 	}
 }
 
-// FuzzCleanJSONResponse は、LLM 出力の補修が panic せず、かつ「入力を変えた結果として
-// 不正な JSON を作り出さない」ことを検証します。
+// FuzzCleanJSONResponse checks that repairing LLM output does not panic, and that it "never
+// produces invalid JSON as a result of changing the input".
 //
-// この関数は json.Unmarshal の前段で必ず通るため、ここが壊れると構造化出力の経路
-// 全体が壊れます。手で並べたケースでは、文字列リテラルの走査と括弧の切り出しが
-// 組み合わさる場所を網羅しきれません。
+// This function always runs before json.Unmarshal, so if it breaks, the whole structured-output
+// path breaks. Hand-picked cases cannot cover every place where string-literal scanning and
+// bracket extraction combine.
 func FuzzCleanJSONResponse(f *testing.F) {
 	seeds := []string{
 		`{"title":"ok"}`,
@@ -233,7 +233,7 @@ func FuzzCleanJSONResponse(f *testing.F) {
 		"}{",
 		`{"a":"\"escaped\""}`,
 		strings.Repeat("{", 128),
-		// 文字列リテラルの中の崩れ（生の制御文字・裸のバックスラッシュ）。
+		// Breakage inside string literals (raw control characters, bare backslashes).
 		"{\"a\":\"1行目\n2行目\"}",
 		"{\"a\":\"tab\there\"}",
 		`{"a":"\d+"}`,
@@ -251,15 +251,15 @@ func FuzzCleanJSONResponse(f *testing.F) {
 	f.Fuzz(func(t *testing.T, raw string) {
 		got := CleanJSONResponse(raw)
 
-		// 出力が入力と同じなら「補正できなかった」ことを意味するので不変条件はない。
+		// If the output equals the input, it means "could not be corrected", so there is no invariant.
 		if got == raw {
 			return
 		}
 
-		// 入力を書き換えた以上、その結果は必ず妥当な JSON でなければならない。
-		// そうでないと呼び出し側の json.Unmarshal が、元の入力より悪い状態で失敗する。
+		// Once the input has been rewritten, the result must always be valid JSON.
+		// Otherwise the caller's json.Unmarshal would fail in a worse state than with the original input.
 		if !json.Valid([]byte(got)) {
-			t.Fatalf("入力を書き換えたのに不正な JSON になりました\n入力: %q\n出力: %q", raw, got)
+			t.Fatalf("rewrote the input but produced invalid JSON\ninput: %q\noutput: %q", raw, got)
 		}
 	})
 }

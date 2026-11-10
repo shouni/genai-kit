@@ -2,30 +2,30 @@ package imagegen
 
 import "errors"
 
-// センチネルの文言は英語 + "imagegen: " プレフィックスで統一しています。深いラップの
-// 中に埋まってもどのパッケージ由来か判別できるようにするためで、人間向けの文脈は
-// ラップする側（fmt.Errorf の %w）が日本語で補います。
+// Sentinel text is English with an "imagegen: " prefix. That way the originating package can
+// be told even when the error is buried deep in a wrap; human-facing context is added by the
+// wrapping side (fmt.Errorf with %w).
 var (
-	// ErrGeneratorRequired は、New に生成クライアントが渡されなかった場合に返されます。
+	// ErrGeneratorRequired is returned when New is not given a generation client.
 	ErrGeneratorRequired = errors.New("imagegen: gemini generator is required")
-	// ErrModelRequired は、生成リクエストにモデル名が指定されていない場合に返されます。
+	// ErrModelRequired is returned when a generation request does not specify a model name.
 	ErrModelRequired = errors.New("imagegen: model is required")
-	// ErrEmptyPrompt は、プロンプト（ネガティブプロンプト含む）が空の場合に返されます。
+	// ErrEmptyPrompt is returned when the prompt (including the negative prompt) is empty.
 	ErrEmptyPrompt = errors.New("imagegen: prompt cannot be empty")
-	// ErrUnsupportedReference は、参照画像の URI が gs:// 以外を指している場合に返されます。
+	// ErrUnsupportedReference is returned when a reference image URI points to something other than gs://.
 	//
-	// URI で参照できるのは Vertex AI がモデル側で解決できる gs:// だけです。
-	// http(s):// の画像は呼び出し側が取得し、バイト列として Request.References へ
-	// 渡してください。
+	// Only gs://, which Vertex AI can resolve on the model side, can be referenced by URI.
+	// For an http(s):// image, have the caller fetch it and pass the bytes in
+	// Request.References.
 	ErrUnsupportedReference = errors.New("imagegen: reference URI must be a gs:// URI")
-	// ErrConflictingReferences は、Request.Images と Request.References の両方が
-	// 指定された場合に返されます。2 本のリストの間の順序を決める根拠が無く、
-	// 参照画像の順序は生成結果を変えるため、黙って連結せずに弾きます。
+	// ErrConflictingReferences is returned when both Request.Images and Request.References
+	// are specified. There is no basis for ordering the two lists against each other, and the
+	// order of reference images changes the result, so they are refused rather than silently joined.
 	ErrConflictingReferences = errors.New("imagegen: Images and References cannot both be set")
-	// ErrMissingReferenceMIMEType は、バイト列で渡した参照画像に MIME type が
-	// 指定されていない場合に返されます。バイト列からは型が決まらず、誤った申告は
-	// 受け取り側の解釈を壊すため、推測せずに要求します。
+	// ErrMissingReferenceMIMEType is returned when a reference image passed as bytes has no
+	// MIME type. The type cannot be determined from the bytes, and a wrong declaration breaks
+	// the receiver's interpretation, so it is required rather than guessed.
 	ErrMissingReferenceMIMEType = errors.New("imagegen: inline reference requires a MIME type")
-	// ErrNoImageData は、レスポンスに画像データが含まれていない場合に返されます。
+	// ErrNoImageData is returned when the response contains no image data.
 	ErrNoImageData = errors.New("imagegen: no image data found in response")
 )

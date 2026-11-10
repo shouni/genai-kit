@@ -23,7 +23,7 @@ func TestDecodeJSON(t *testing.T) {
 		{"fenced", "```json\n{\"title\":\"a\",\"lines\":[]}\n```", decodeTarget{Title: "a", Lines: []string{}}},
 		{"with preamble", "Here you go:\n{\"title\":\"a\"}\nHope it helps.", decodeTarget{Title: "a"}},
 		{"broken escape in string", `{"title":"a\qb"}`, decodeTarget{Title: `a\qb`}},
-		// v1 のデコードはメンバー名の大文字小文字を区別しない。v2 だとゼロ値になる。
+		// v1 decoding matches member names case-insensitively. With v2 it would be the zero value.
 		{"case-insensitive member", `{"Title":"a"}`, decodeTarget{Title: "a"}},
 	}
 	for _, tt := range tests {

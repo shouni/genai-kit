@@ -6,57 +6,57 @@ import (
 	"google.golang.org/genai"
 )
 
-// Response は生成結果のラッパーです。
+// Response wraps a generation result.
 type Response struct {
 	Text   string
-	Images [][]byte // 生成画像 (InlineData) を保持します
-	Audios [][]byte // Lyria 3 等の音声データ
-	// Attachments は返却されたメディアを MIME type 付きで保持します。
+	Images [][]byte // holds generated images (InlineData)
+	Audios [][]byte // audio data from Lyria 3 and the like
+	// Attachments holds the returned media together with their MIME types.
 	//
-	// Images / Audios はバイト列だけなので、保存時の拡張子や Content-Type を決める
-	// 必要がある呼び出し側のために、型を保ったまま取り出せる形を用意しています。
-	// 順序は API の返却順です。
+	// Images / Audios are bytes only, so for callers that need to decide the extension or
+	// Content-Type when saving, this provides a form that can be extracted with its type intact.
+	// The order is the order the API returned them in.
 	//
-	// GenerateOptions.OutputURIPrefix を指定した場合、メディアは GCS に書き込まれて
-	// URI だけが返るため、その要素は Data が空で URI が設定されます。Images / Audios は
-	// バイト列を持つ要素だけの部分集合なので、URI の要素は含まれません。
+	// When GenerateOptions.OutputURIPrefix is specified, the media is written to GCS and only the
+	// URI is returned, so such an element has an empty Data and a URI set. Images / Audios are the
+	// subset of elements that carry bytes, so URI elements are not included.
 	Attachments []Attachment
-	// Thoughts は思考サマリです。GenerateOptions.IncludeThoughts が true で、
-	// かつモデルが思考サマリを返した場合にのみ設定されます。
-	// Text には含まれません。
+	// Thoughts is the thought summary. It is set only when GenerateOptions.IncludeThoughts is true
+	// and the model returned a thought summary.
+	// It is not included in Text.
 	Thoughts string
 	Usage    *TokenUsage
 }
 
-// TokenUsage は生成レスポンスのトークン使用量です。
+// TokenUsage is the token usage of a generation response.
 type TokenUsage struct {
 	PromptTokenCount     int32
 	CandidatesTokenCount int32
 	TotalTokenCount      int32
-	// ThoughtsTokenCount は思考に消費されたトークン数です。
-	// 課金対象になるため、思考機能を使う場合はこの値を監視してください。
+	// ThoughtsTokenCount is the number of tokens consumed by thinking.
+	// It is billed, so monitor this value when using thinking.
 	ThoughtsTokenCount int32
 }
 
-// responseFromGenAI は genai のレスポンスをパッケージ公開型の Response に変換します。
+// responseFromGenAI converts a genai response into the package's public Response type.
 //
-// outputToGCS は、リクエストで GenerationOutputConfig（OutputURIPrefix）を送ったかどうかです。
-// 送ったときだけ FileData の URI を Attachments に含めます（理由は extractAttachments を参照）。
+// outputToGCS is whether the request sent a GenerationOutputConfig (OutputURIPrefix).
+// FileData URIs are included in Attachments only when it was sent (see extractAttachments for why).
 func responseFromGenAI(resp *genai.GenerateContentResponse, outputToGCS bool) (*Response, error) {
 	text, err := extractText(resp)
 	if err != nil {
 		return nil, err
 	}
 
-	// MIME type で振り分ける。Images / Audios は Attachments の部分集合で、
-	// 型を意識せずバイト列だけ欲しい呼び出し側のための入口です。
+	// Sort by MIME type. Images / Audios are subsets of Attachments, an entry point for callers
+	// that only want bytes without caring about the type.
 	attachments := extractAttachments(resp, outputToGCS)
 	var images [][]byte
 	var audios [][]byte
 	for _, attachment := range attachments {
 		switch {
 		case len(attachment.Data) == 0:
-			// URI で返った要素はバイト列を持たない。
+			// An element returned as a URI has no bytes.
 		case strings.HasPrefix(attachment.MIMEType, "image/"):
 			images = append(images, attachment.Data)
 		case strings.HasPrefix(attachment.MIMEType, "audio/"):
@@ -74,11 +74,11 @@ func responseFromGenAI(resp *genai.GenerateContentResponse, outputToGCS bool) (*
 	}, nil
 }
 
-// firstCandidate は、レスポンスの先頭候補を返します。候補が無い場合は nil です。
+// firstCandidate returns the first candidate of the response, or nil if there are none.
 //
-// パートやコンテンツと同様、候補スロット自体もサーバーから来る値であり nil であり得ます。
-// テキスト・思考・インラインデータの各抽出関数が個別に nil 判定を書くと、判定の
-// 抜け漏れが関数ごとにずれるため（実際にずれていた）、走査の入口をここに集約しています。
+// Like parts and content, the candidate slot itself is a value from the server and can be nil.
+// If each extraction function for text, thoughts and inline data wrote its own nil check, gaps in
+// the checks would differ per function (they actually did), so the entry to the traversal is gathered here.
 func firstCandidate(resp *genai.GenerateContentResponse) *genai.Candidate {
 	if resp == nil || len(resp.Candidates) == 0 {
 		return nil
@@ -86,7 +86,7 @@ func firstCandidate(resp *genai.GenerateContentResponse) *genai.Candidate {
 	return resp.Candidates[0]
 }
 
-// candidateParts は、候補のパート列を返します。候補やコンテンツが nil の場合は nil です。
+// candidateParts returns the candidate's parts. It is nil if the candidate or content is nil.
 func candidateParts(candidate *genai.Candidate) []*genai.Part {
 	if candidate == nil || candidate.Content == nil {
 		return nil
@@ -94,12 +94,12 @@ func candidateParts(candidate *genai.Candidate) []*genai.Part {
 	return candidate.Content.Parts
 }
 
-// extractText は resp からテキストを抽出します。
+// extractText extracts the text from resp.
 func extractText(resp *genai.GenerateContentResponse) (string, error) {
-	// 入力のブロックは候補の有無より先に見ます。通常は候補 0 件で届きますが、
-	// 自動継続の途中の回が弾かれると、SDK（genai v1.75.0 以降）は前の回の候補から
-	// CONTINUATION を消して PromptFeedback だけを残すため、候補を先に見ると
-	// 途中までの本文が正常終了として返ってしまいます。
+	// An input block is checked before whether there are candidates. It normally arrives with zero
+	// candidates, but when a hop in the middle of automatic continuation is refused, the SDK (genai
+	// v1.75.0 and later) clears CONTINUATION from the earlier hop's candidate and keeps only the
+	// PromptFeedback, so checking candidates first would return the partial body as a normal finish.
 	if resp != nil && isPromptBlocked(resp.PromptFeedback) {
 		return "", newPromptBlockedError(resp.PromptFeedback)
 	}
@@ -109,18 +109,18 @@ func extractText(resp *genai.GenerateContentResponse) (string, error) {
 		return "", newEmptyResponseError()
 	}
 
-	// FinishReason が正常（未設定 または STOP）以外の場合は、途中で止められたとみなします。
-	// 未設定の判定は isUnsetFinishReason に集約しています（ゼロ値と SDK 定数が別値のため）。
+	// A FinishReason other than normal (unset or STOP) is treated as having been stopped midway.
+	// The unset check is gathered in isUnsetFinishReason (because the zero value and the SDK constant differ).
 	if isBlockedFinishReason(candidate.FinishReason) {
 		return "", newFinishReasonError(candidate.FinishReason)
 	}
 
-	// すべてのテキストパートを連結して返します。
+	// Concatenate and return all text parts.
 	//
-	// 思考機能 (ThinkingBudget) が有効なモデルは、思考サマリを Thought=true の
-	// テキストパートとして本文より前に返します。最初の非空テキストを返す実装では
-	// 本文ではなく思考サマリを返してしまうため、Thought パートは除外します。
-	// また、モデルは本文を複数パートに分割して返すことがあるため連結が必要です。
+	// Models with thinking (ThinkingBudget) enabled return the thought summary as text parts with
+	// Thought=true before the body. An implementation returning the first non-empty text would
+	// return the thought summary instead of the body, so Thought parts are excluded.
+	// Models also sometimes split the body across several parts, so concatenation is needed.
 	var sb strings.Builder
 	for _, part := range candidateParts(candidate) {
 		if part == nil || part.Thought || part.Text == "" {
@@ -132,8 +132,8 @@ func extractText(resp *genai.GenerateContentResponse) (string, error) {
 	return sb.String(), nil
 }
 
-// extractThoughts は思考サマリ（Thought=true のテキストパート）を連結して返します。
-// 思考機能が無効な場合や思考サマリが返されない場合は空文字列になります。
+// extractThoughts concatenates and returns the thought summary (text parts with Thought=true).
+// It is an empty string when thinking is disabled or no thought summary is returned.
 func extractThoughts(resp *genai.GenerateContentResponse) string {
 	var sb strings.Builder
 	for _, part := range candidateParts(firstCandidate(resp)) {
@@ -145,20 +145,20 @@ func extractThoughts(resp *genai.GenerateContentResponse) string {
 	return sb.String()
 }
 
-// extractAttachments は、レスポンスに含まれるメディアを MIME type 付きで
-// 返却順のまま取り出します。
+// extractAttachments extracts the media in the response with their MIME types, in the order
+// they were returned.
 //
-// withFileData が true のときは、インラインデータに加えて FileData も拾います。
-// OutputURIPrefix を指定するとメディアは GCS に書き込まれて FileData の URI だけが
-// 返るため、InlineData しか見ないと生成物を丸ごと取りこぼします。
+// When withFileData is true, it picks up FileData in addition to inline data.
+// With OutputURIPrefix specified, the media is written to GCS and only a FileData URI comes
+// back, so looking only at InlineData would miss the output entirely.
 //
-// 指定していないときに FileData を拾わないのは、呼び出し側が「Attachments の要素には
-// バイト列がある」前提で読んでいるためです。想定外の FileData が Data の空な要素として
-// 混ざると、以前はデータ無しのエラーになった応答が、空のバイト列の成功として通ります
-// （imagegen は空の画像を、lyria は空の Track を返し、保存側は空ファイルを書きます）。
+// FileData is not picked up otherwise because callers read on the premise that "every element of
+// Attachments has bytes". If unexpected FileData slipped in as elements with an empty Data, a
+// response that used to be a no-data error would pass as a success with empty bytes
+// (imagegen would return an empty image, lyria an empty Track, and the storage side would write an empty file).
 //
-// nil のパートを読み飛ばすのは extractText / extractThoughts と同じ理由です。
-// パートはサーバーから来るものなので、こちら側の検証で nil を排除できません。
+// nil parts are skipped for the same reason as in extractText / extractThoughts.
+// Parts come from the server, so our own validation cannot rule out nil.
 func extractAttachments(resp *genai.GenerateContentResponse, withFileData bool) []Attachment {
 	var attachments []Attachment
 	for _, part := range candidateParts(firstCandidate(resp)) {
@@ -179,7 +179,7 @@ func extractAttachments(resp *genai.GenerateContentResponse, withFileData bool) 
 	return attachments
 }
 
-// tokenUsageFromMetadata は genai のトークン使用量メタデータを公開型に変換します。
+// tokenUsageFromMetadata converts genai's token usage metadata into the public type.
 func tokenUsageFromMetadata(meta *genai.GenerateContentResponseUsageMetadata) *TokenUsage {
 	if meta == nil {
 		return nil

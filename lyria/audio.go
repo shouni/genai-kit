@@ -12,48 +12,50 @@ import (
 	"github.com/shouni/genai-kit/gemini"
 )
 
-// AudioGenerator は、組み立て済みのプロンプトから音声を生成します。
+// AudioGenerator generates audio from an assembled prompt.
 type AudioGenerator interface {
 	GenerateAudio(ctx context.Context, req AudioRequest) (*Track, error)
 }
 
-// AudioRequest は 1 回の音声生成の入力です。
+// AudioRequest is the input to one audio generation.
 //
-// レシピではなくプロンプトを受け取るのは、プロンプトの組み立てが呼び出し側の方針で決まるからです。
-// 歌詞をどの表記で渡すか、どの生成先向けの構成か、といった判断はレシピの外の情報を要し、
-// このパッケージが Recipe を受け取ってビルダーへ回すと、その情報を Recipe に載せるしかなくなります。
+// It takes a prompt rather than a recipe because how the prompt is assembled is decided by caller policy.
+// Decisions such as how to write the lyrics and which target the structure is designed for need
+// information outside the recipe; if this package took a Recipe and handed it to a builder, that
+// information would have to be carried on Recipe.
 type AudioRequest struct {
-	// Prompt は Lyria へ渡すプロンプト全文です。空は ErrNilInput です。
+	// Prompt is the full prompt passed to Lyria. Empty is ErrNilInput.
 	Prompt string
-	// Model は使う音声モデルです。空は WithLyriaModel の既定です。
+	// Model is the audio model to use. Empty means the WithLyriaModel default.
 	Model string
-	// Seed は Lyria へ渡す seed です。nil は指定なしです。
+	// Seed is the seed passed to Lyria. nil means unspecified.
 	Seed *int64
-	// Images は添える参照画像です。
+	// Images are the attached reference images.
 	Images []ImagePayload
 }
 
-// Track は 1 回の音声生成の結果です。MIME type とテキストは呼び出し側で作り直せないため、
-// 音声バイト列と一緒に返します。
+// Track is the result of one audio generation. The MIME type and text cannot be recreated by
+// the caller, so they are returned together with the audio bytes.
 type Track struct {
-	// Audio は生成された音声バイト列です。
+	// Audio is the generated audio bytes.
 	Audio []byte
-	// MIMEType は Audio の MIME type です（"audio/mpeg" など）。
-	// 保存時の拡張子や Content-Type を決めるのに使います。
+	// MIMEType is the MIME type of Audio (such as "audio/mpeg").
+	// It is used to decide the extension and Content-Type when saving.
 	MIMEType string
-	// SungLyrics は、音声と一緒に返されたテキストです。
+	// SungLyrics is the text returned together with the audio.
 	//
-	// lyria-3.5 はここへ自身が組んだ譜面を返します（実測では区間を [[B1]] [[C2]]、歌唱行を
-	// [:] で始める記譜、歌詞は渡した表記のまま）。鳴った音の書き起こしではないので、依頼した
-	// 歌詞と突き合わせて分かるのは「モデルが最初から歌う気の無かった行」までです。
+	// lyria-3.5 returns here the score it laid out itself (measured: sections written as [[B1]] [[C2]],
+	// sung lines starting with [:], lyrics in the notation they were passed in). It is not a
+	// transcription of what was played, so comparing it with the requested lyrics only reveals
+	// "lines the model never intended to sing in the first place".
 	//
-	// 空文字は異常ではありません。テキストを返さないモデルや、器楽だけの生成があります。
+	// An empty string is not abnormal. Some models return no text, and some generations are instrumental only.
 	SungLyrics string
 }
 
-// Clone は、呼び出し元が安全に変更できる複製を返します。
-// 生成結果は singleflight で同時呼び出しの間に共有されるため（callguard.Do）、複製せずに
-// 返すと一方の書き換えがもう一方へ波及します。
+// Clone returns a copy the caller can modify safely.
+// Generation results are shared between concurrent calls through singleflight (callguard.Do),
+// so returning without copying would let one caller's modification spill over to the other.
 func (t *Track) Clone() *Track {
 	if t == nil {
 		return nil
@@ -64,16 +66,16 @@ func (t *Track) Clone() *Track {
 	return &dst
 }
 
-// audioGenerator はプロンプトを Lyria に渡し、音声を生成します。
+// audioGenerator passes the prompt to Lyria and generates audio.
 type audioGenerator struct {
 	aiClient          gemini.Generator
 	defaultLyriaModel string
-	// guard は nil で「制限なし・既定の上限時間」を意味します。
+	// A nil guard means "no limits, default time limit".
 	guard *callguard.Guard
 	group callguard.Group
 }
 
-// GenerateAudio はプロンプトを 1 回の Lyria 呼び出しで音声化します。
+// GenerateAudio turns the prompt into audio with a single Lyria call.
 func (g *audioGenerator) GenerateAudio(ctx context.Context, req AudioRequest) (*Track, error) {
 	if req.Prompt == "" {
 		return nil, fmt.Errorf("%w: audio prompt", ErrNilInput)
@@ -117,10 +119,10 @@ func (g *audioGenerator) GenerateAudio(ctx context.Context, req AudioRequest) (*
 	return track.Clone(), nil
 }
 
-// firstAudioAttachment は、レスポンスから最初の音声添付を MIME type ごと取り出します。
+// firstAudioAttachment extracts the first audio attachment from the response, along with its MIME type.
 //
-// Response.Audios ではなく Attachments を見るのは MIME type を保つためです。Audios は
-// Attachments を同じ接頭辞判定で絞った部分集合なので、選ばれる要素は変わりません。
+// It looks at Attachments rather than Response.Audios to keep the MIME type. Audios is a
+// subset of Attachments filtered by the same prefix check, so the selected element does not change.
 func firstAudioAttachment(resp *gemini.Response) (gemini.Attachment, bool) {
 	if resp == nil {
 		return gemini.Attachment{}, false
@@ -134,10 +136,10 @@ func firstAudioAttachment(resp *gemini.Response) (gemini.Attachment, bool) {
 	return gemini.Attachment{}, false
 }
 
-// imagesHash は画像ペイロードの内容から singleflight 用のキー部品を作ります。
+// imagesHash builds a singleflight key component from the content of the image payloads.
 //
-// バイト列のまま長さプレフィックス付き（callguard.WriteHashPart と同じ枠組み）で流すのは、
-// callguard.Key へ渡すために文字列化すると数 MB の複製がキー作成のたびに走るためです。
+// The bytes are streamed as is with a length prefix (the same framing as callguard.WriteHashPart)
+// because converting them to a string to pass to callguard.Key would copy several MB on every key build.
 func imagesHash(images []ImagePayload) string {
 	hasher := sha256.New()
 	for _, image := range images {

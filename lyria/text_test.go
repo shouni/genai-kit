@@ -13,16 +13,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTextGenerator は、発射間隔なしの textGenerator を組み立てます。
-// guard を nil のままにできるのは、callguard が nil を「制限なし・既定の上限時間」と
-// して扱うためです。
+// newTextGenerator builds a textGenerator with no firing interval.
+// guard can be left nil because callguard treats nil as "no limits, default time
+// limit".
 func newTextGenerator(ai gemini.Generator, prompts TextPromptBuilder) *textGenerator {
 	return &textGenerator{aiClient: ai, prompts: prompts, defaultModel: "gemini-flash"}
 }
 
-// TestGenerateLyricsSendsJSONOptions は、歌詞生成が構造化出力の設定つきで送られる
-// ことを検証します。スキーマが落ちるとモデル出力が文法的に制約されなくなり、
-// JSON の崩れが CleanJSONResponse 頼みになります。
+// TestGenerateLyricsSendsJSONOptions checks that lyrics generation is sent with the structured-output
+// settings. If the schema is dropped, the model output is no longer grammatically constrained, and
+// broken JSON has to rely on CleanJSONResponse.
 func TestGenerateLyricsSendsJSONOptions(t *testing.T) {
 	seed := int64(42)
 	ai := textResponder(validLyricsJSON)
@@ -30,34 +30,34 @@ func TestGenerateLyricsSendsJSONOptions(t *testing.T) {
 	g := newTextGenerator(ai, prompts)
 
 	_, err := g.GenerateLyrics(context.Background(), AIModels{LyricsMode: "ballad", Seed: &seed},
-		&CollectedContent{Prompt: "収集したテキスト"})
+		&CollectedContent{Prompt: "collected text"})
 	require.NoError(t, err)
 
-	// プロンプト構築にはモードと入力がそのまま渡る。
+	// The mode and input are passed to prompt construction as is.
 	assert.Equal(t, "ballad", prompts.gotLyricsMode)
-	assert.Equal(t, "収集したテキスト", prompts.gotLyricsInput)
+	assert.Equal(t, "collected text", prompts.gotLyricsInput)
 
 	call := ai.lastCall(t)
 	assert.Equal(t, "lyrics prompt", call.Prompt)
 	assert.Equal(t, "application/json", call.Opts.ResponseMIMEType)
-	assert.NotNil(t, call.Opts.ResponseSchema, "構造化出力スキーマが指定されていません")
-	assert.NotEmpty(t, call.Opts.SafetySettings, "安全設定が指定されていません")
+	assert.NotNil(t, call.Opts.ResponseSchema, "no structured-output schema was specified")
+	assert.NotEmpty(t, call.Opts.SafetySettings, "no safety settings were specified")
 	if assert.NotNil(t, call.Opts.Seed) {
 		assert.Equal(t, seed, *call.Opts.Seed)
 	}
-	assert.Nil(t, call.Attachments, "歌詞生成に添付は送らない")
+	assert.Nil(t, call.Attachments, "no attachments are sent for lyrics generation")
 }
 
-// TestGenerateLyricsResolvesModel は、呼び出しごとのモデル指定が既定より優先される
-// ことを検証します。
+// TestGenerateLyricsResolvesModel checks that a per-call model takes precedence over the
+// default.
 func TestGenerateLyricsResolvesModel(t *testing.T) {
 	tests := []struct {
 		name      string
 		textModel string
 		want      string
 	}{
-		{"未指定なら既定モデル", "", "gemini-flash"},
-		{"指定があればそちらを使う", "gemini-pro", "gemini-pro"},
+		{"default model when unspecified", "", "gemini-flash"},
+		{"uses the specified model when given", "gemini-pro", "gemini-pro"},
 	}
 
 	for _, tt := range tests {
@@ -74,8 +74,8 @@ func TestGenerateLyricsResolvesModel(t *testing.T) {
 	}
 }
 
-// TestGenerateLyricsCleansJSONResponse は、Markdown のフェンスで包まれた応答でも
-// 解釈できることを検証します。構造化出力を指定していても起きる崩れです。
+// TestGenerateLyricsCleansJSONResponse checks that a response wrapped in a Markdown fence can
+// still be parsed. This breakage happens even with structured output specified.
 func TestGenerateLyricsCleansJSONResponse(t *testing.T) {
 	ai := textResponder("```json\n" + validLyricsJSON + "\n```")
 	g := newTextGenerator(ai, &stubTextPrompts{lyricsPrompt: "p"})
@@ -97,42 +97,42 @@ func TestGenerateLyricsErrorBranches(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name:        "プロンプト構築の失敗",
+			name:        "prompt construction fails",
 			prompts:     &stubTextPrompts{lyricsErr: errors.New("prompt boom")},
 			ai:          &fakeGenerator{},
 			wantMessage: "failed to build lyrics prompt",
 		},
 		{
-			name:        "AI がエラーを返す",
+			name:        "AI returns an error",
 			prompts:     &stubTextPrompts{lyricsPrompt: "p"},
 			ai:          &fakeGenerator{err: errors.New("ai boom")},
 			wantMessage: "lyrics generation failed",
 		},
 		{
-			name:        "AI が nil レスポンスを返す",
+			name:        "AI returns a nil response",
 			prompts:     &stubTextPrompts{lyricsPrompt: "p"},
 			ai:          &fakeGenerator{},
 			wantErr:     ErrInvalidResponse,
 			wantMessage: "lyrics response is nil",
 		},
 		{
-			name:        "AI が空文字列を返す",
+			name:        "AI returns an empty string",
 			prompts:     &stubTextPrompts{lyricsPrompt: "p"},
 			ai:          textResponder("   "),
 			wantErr:     ErrInvalidResponse,
 			wantAlsoErr: gemini.ErrEmptyResponse,
 		},
 		{
-			name:        "JSON として解釈できない",
+			name:        "cannot be parsed as JSON",
 			prompts:     &stubTextPrompts{lyricsPrompt: "p"},
-			ai:          textResponder("これは JSON ではありません"),
+			ai:          textResponder("this is not JSON"),
 			wantErr:     ErrInvalidResponse,
 			wantAlsoErr: gemini.ErrInvalidJSON,
-			wantMessage: "これは JSON ではありません", // 抜粋が残る
+			wantMessage: "this is not JSON", // the excerpt remains
 		},
 		{
-			// スキーマは満たすが本文が空。再試行しても解決しない可能性が高い失敗です。
-			name:    "スキーマは通るが歌詞が空",
+			// Satisfies the schema but the body is empty. A failure that retrying is unlikely to fix.
+			name:    "passes the schema but the lyrics are empty",
 			prompts: &stubTextPrompts{lyricsPrompt: "p"},
 			ai:      textResponder(`{"title":"t","theme":"th","hook":"h","lyrics":"  "}`),
 			wantErr: ErrEmptyLyrics,
@@ -150,7 +150,7 @@ func TestGenerateLyricsErrorBranches(t *testing.T) {
 				assert.ErrorIs(t, err, tt.wantErr)
 			}
 			if tt.wantAlsoErr != nil {
-				assert.ErrorIs(t, err, tt.wantAlsoErr, "gemini 側の番兵も鎖に残ること")
+				assert.ErrorIs(t, err, tt.wantAlsoErr, "the gemini-side sentinel stays in the chain too")
 			}
 			if tt.wantMessage != "" {
 				assert.Contains(t, err.Error(), tt.wantMessage)
@@ -167,12 +167,12 @@ func TestGenerateLyricsRejectsNilInput(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNilInput)
 }
 
-// TestComposeAttachesModelsAndSeed は、生成されたレシピに呼び出し時の AIModels と
-// Seed が付与されることを検証します。
+// TestComposeAttachesModelsAndSeed checks that the AIModels and Seed from the call are attached
+// to the generated recipe.
 //
-// レシピのスキーマはこれらを意図的に含めておらず（モデルに生成させない）、生成後に
-// コードが付けています。ここが抜けると、Seed を指定した再現生成がエラーも警告も
-// 無しに効かなくなります。
+// The recipe schema deliberately leaves these out (the model does not generate them), and code
+// attaches them after generation. If this were missing, reproducible generation with a specified
+// Seed would stop working with neither an error nor a warning.
 func TestComposeAttachesModelsAndSeed(t *testing.T) {
 	seed := int64(42)
 	ai := textResponder(`{"title":"Rainy Amsterdam","tempo":85,"mood":"melancholic"}`)
@@ -197,18 +197,18 @@ func TestComposeAttachesModelsAndSeed(t *testing.T) {
 	if assert.NotNil(t, recipe.Seed) {
 		assert.Equal(t, seed, *recipe.Seed)
 	}
-	// 共有結果ではなく複製に付与していること（Seed のポインタが使い回されていない）。
+	// They are attached to a copy, not the shared result (the Seed pointer is not reused).
 	assert.NotSame(t, models.Seed, recipe.Seed)
 
-	// 歌詞も生成後に付けられ、こちらも複製である。
+	// The lyrics are also attached after generation, and are a copy too.
 	require.NotNil(t, recipe.Lyrics)
 	assert.Equal(t, "Rainy Amsterdam", recipe.Lyrics.Title)
 	assert.NotSame(t, lyrics, recipe.Lyrics)
 }
 
-// TestComposeParsesFullRecipe は、レシピ JSON の各項目が取り込まれることを
-// 検証します。セクションの timeline はレシピの再利用時に検証されるため、
-// 落ちると下流で弾かれます。
+// TestComposeParsesFullRecipe checks that each field of the recipe JSON is picked up.
+// The sections' timeline is validated when the recipe is reused, so if it were dropped
+// it would be refused downstream.
 func TestComposeParsesFullRecipe(t *testing.T) {
 	const rawJSON = `{
 		"title": "Lofi Chill",
@@ -236,9 +236,9 @@ func TestComposeParsesFullRecipe(t *testing.T) {
 	assert.Equal(t, 30, recipe.Sections[0].EndSeconds)
 }
 
-// TestComposeDefaultsComposeMode は、モード未指定時に既定モードでプロンプトを
-// 組み立てることを検証します。空文字列のまま渡すと、モードで分岐する呼び出し側の
-// プロンプト実装が該当なしで失敗します。
+// TestComposeDefaultsComposeMode checks that when no mode is specified the prompt is built with
+// the default mode. Passing an empty string as is would make a caller's prompt implementation
+// that branches on the mode fail with no match.
 func TestComposeDefaultsComposeMode(t *testing.T) {
 	prompts := &stubTextPrompts{recipePrompt: "p"}
 	g := newTextGenerator(textResponder(`{"title":"Song"}`), prompts)
@@ -259,26 +259,26 @@ func TestComposeErrorBranches(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name:        "プロンプト構築の失敗",
+			name:        "prompt construction fails",
 			prompts:     &stubTextPrompts{recipeErr: errors.New("prompt boom")},
 			ai:          &fakeGenerator{},
 			wantMessage: "failed to build prompt",
 		},
 		{
-			name:        "AI がエラーを返す",
+			name:        "AI returns an error",
 			prompts:     &stubTextPrompts{recipePrompt: "p"},
 			ai:          &fakeGenerator{err: errors.New("ai boom")},
 			wantMessage: "compose generation failed",
 		},
 		{
-			name:        "AI が nil レスポンスを返す",
+			name:        "AI returns a nil response",
 			prompts:     &stubTextPrompts{recipePrompt: "p"},
 			ai:          &fakeGenerator{},
 			wantErr:     ErrInvalidResponse,
 			wantMessage: "compose response is nil",
 		},
 		{
-			name:        "AI が空文字列を返す",
+			name:        "AI returns an empty string",
 			prompts:     &stubTextPrompts{recipePrompt: "p"},
 			ai:          textResponder(""),
 			wantErr:     ErrInvalidResponse,
@@ -297,7 +297,7 @@ func TestComposeErrorBranches(t *testing.T) {
 				assert.ErrorIs(t, err, tt.wantErr)
 			}
 			if tt.wantAlsoErr != nil {
-				assert.ErrorIs(t, err, tt.wantAlsoErr, "gemini 側の番兵も鎖に残ること")
+				assert.ErrorIs(t, err, tt.wantAlsoErr, "the gemini-side sentinel stays in the chain too")
 			}
 			if tt.wantMessage != "" {
 				assert.Contains(t, err.Error(), tt.wantMessage)
@@ -314,9 +314,9 @@ func TestComposeRejectsNilLyrics(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNilInput)
 }
 
-// TestGenerateJSONTruncatesRawOutputInError は、解釈できなかった生出力が
-// エラーメッセージの中で切り詰められることを検証します。レシピ JSON は数 KB に
-// なるため、全文を埋め込むとログ 1 行が肥大化します。
+// TestGenerateJSONTruncatesRawOutputInError checks that raw output that could not be parsed is
+// truncated in the error message. A recipe JSON runs to several KB, so embedding all of it
+// bloats a single log line.
 func TestGenerateJSONTruncatesRawOutputInError(t *testing.T) {
 	long := "{" + strings.Repeat("x", 5000)
 	g := newTextGenerator(textResponder(long), &stubTextPrompts{lyricsPrompt: "p"})
@@ -325,13 +325,13 @@ func TestGenerateJSONTruncatesRawOutputInError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "…(truncated)")
-	assert.Less(t, len(err.Error()), len(long), "生出力が丸ごと埋め込まれています")
+	assert.Less(t, len(err.Error()), len(long), "the raw output is embedded in full")
 }
 
-// TestGenerateLyricsDeduplicatesConcurrentCalls は、同一内容の同時呼び出しが 1 回に
-// まとまり、それでも各呼び出し元が独立した結果を受け取ることを検証します。
+// TestGenerateLyricsDeduplicatesConcurrentCalls checks that concurrent calls with the same content
+// collapse into one, while each caller still receives an independent result.
 //
-// 共有結果をそのまま返すと、1 人が書き換えた内容が他の呼び出し元にも見えます。
+// Returning the shared result as is would let one caller's modification be visible to the others.
 func TestGenerateLyricsDeduplicatesConcurrentCalls(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
@@ -353,29 +353,29 @@ func TestGenerateLyricsDeduplicatesConcurrentCalls(t *testing.T) {
 			})
 		}
 
-		// バブル内の他のゴルーチンがすべてブロックした時点で Wait が返るため、
-		// 「合流したはず」の待ち時間もポーリングも要りません。
+		// Wait returns once every other goroutine in the bubble is blocked, so neither a wait time
+		// for "they should have joined by now" nor polling is needed.
 		synctest.Wait()
 		close(release)
 		wg.Wait()
 
-		require.Equal(t, 1, ai.callCount(), "同一内容の同時呼び出しがまとめられていません")
+		require.Equal(t, 1, ai.callCount(), "concurrent calls with the same content were not collapsed")
 		for _, err := range errs {
 			require.NoError(t, err)
 		}
 
-		// 共有結果ではなく複製が返っていること。
+		// A copy is returned, not the shared result.
 		require.NotSame(t, results[0], results[1])
 		results[0].Keywords[0] = "changed"
-		assert.Equal(t, "one", results[1].Keywords[0], "内部のスライスが共有されています")
+		assert.Equal(t, "one", results[1].Keywords[0], "the internal slice is shared")
 	})
 }
 
-// TestGenerateLyricsSeparatesDifferentSeeds は、seed 違いの同時呼び出しが
-// 1 回の生成結果を共有しないことを検証します。
+// TestGenerateLyricsSeparatesDifferentSeeds checks that concurrent calls with different seeds
+// do not share the result of one generation.
 //
-// seed はプロンプトから導けないのに結果を変えるため、singleflight キーに含め忘れると
-// seed による作り分けが黙って効かなくなります。
+// The seed cannot be derived from the prompt yet changes the result, so if it were left out of
+// the singleflight key, producing different results per seed would silently stop working.
 func TestGenerateLyricsSeparatesDifferentSeeds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
@@ -391,13 +391,13 @@ func TestGenerateLyricsSeparatesDifferentSeeds(t *testing.T) {
 			})
 		}
 
-		// 両方が in-flight に入るまで待つ。相乗りしていなければ呼び出しは 2 回になる。
+		// Wait until both are in flight. If they did not share a call, there are two calls.
 		synctest.Wait()
 		got := ai.callCount()
 
 		close(release)
 		wg.Wait()
 
-		assert.Equal(t, 2, got, "seed 違いが 1 回の生成結果を共有しています")
+		assert.Equal(t, 2, got, "calls with different seeds share one generation result")
 	})
 }

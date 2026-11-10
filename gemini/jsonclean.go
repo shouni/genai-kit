@@ -6,30 +6,30 @@ import (
 	"strings"
 )
 
-// CleanJSONResponse は、AI が返した JSON をそのままでは解釈できないときに補修します。
+// CleanJSONResponse repairs JSON returned by the AI when it cannot be parsed as is.
 //
-// GenerateOptions.ResponseSchema / ResponseJSONSchema で構造化出力を指定しても、
-// モデルは次の形で崩すことがあります。どれも応答を返しきったあとの話なので、
-// API の再試行では直りません。
+// Even with structured output specified via GenerateOptions.ResponseSchema / ResponseJSONSchema,
+// the model sometimes breaks it in the following ways. All of them happen after the response has
+// been returned in full, so an API retry does not fix them.
 //
-//   - Markdown のフェンス（```json … ```）で包む
-//   - 完結した JSON の後ろに説明文や余分な閉じ括弧を継ぎ足す
-//   - '}' の代わりに ')' などで閉じる
-//   - 文字列の中でバックスラッシュをエスケープし忘れる（ソースやパスを引用したとき）
-//   - 文字列の中に改行やタブを生のまま入れる（複数行の本文を引用したとき）
+//   - wrapping it in a Markdown fence (```json … ```)
+//   - appending an explanation or extra closing brackets after a complete JSON value
+//   - closing with ')' or the like instead of '}'
+//   - forgetting to escape a backslash inside a string (when quoting source code or paths)
+//   - putting raw newlines or tabs inside a string (when quoting a multi-line body)
 //
-// 最後の 2 つは、台本の抜粋・歌詞・台詞のように複数行の本文を JSON に載せる用途で
-// 特に起きます。ここで直さないと、数分かけた生成が「解釈できません」の一行だけを
-// 残して丸ごと失われます。
+// The last two happen especially when a multi-line body, such as a script excerpt, lyrics or
+// dialogue, is carried in JSON. Unless they are fixed here, a generation that took minutes is lost
+// entirely, leaving only a one-line "cannot be parsed".
 //
-// 既に解釈できる入力は 1 バイトも変えません。補修しても妥当な JSON にならなければ
-// 入力をそのまま返します。呼び出し側のエラーメッセージが元の壊れ方を指したままになるよう、
-// 悪化させないことを優先します。
+// Input that already parses is not changed by a single byte. If the repair does not produce valid
+// JSON, the input is returned as is. Not making things worse takes priority, so that the caller's
+// error message keeps pointing at the original breakage.
 //
-// go-review-kit の review.SanitizeJSON が同じ問題を解いています。あちらは go.mod を
-// go-git 1 本に絞る方針なのでこのモジュールへは寄せず、意図的に別実装のままにしています
-// （切り詰められた応答からの救出は、データを落とすうえ呼び出し側へ通知する口が要るため、
-// あちらにしかありません）。
+// go-review-kit's review.SanitizeJSON solves the same problem. That module keeps its go.mod down to
+// go-git alone, so it is not merged into this module and deliberately stays a separate implementation
+// (rescuing a truncated response drops data and needs a way to notify the caller, so only that one
+// has it).
 func CleanJSONResponse(input string) string {
 	if json.Valid([]byte(input)) {
 		return input
@@ -39,8 +39,8 @@ func CleanJSONResponse(input string) string {
 		return cleaned
 	}
 
-	// 文字列の中の壊れたエスケープは、括弧の対応では直りません。
-	// バックスラッシュと生の制御文字を補ってからもう一度、値の切り出しを試みます。
+	// Broken escapes inside strings are not fixed by matching brackets.
+	// After filling in backslashes and raw control characters, extracting the value is tried again.
 	escaped := escapeStringLiterals(input)
 	if escaped != input {
 		if json.Valid([]byte(escaped)) {
@@ -54,22 +54,22 @@ func CleanJSONResponse(input string) string {
 	return input
 }
 
-// extractJSONValue は、最初に現れる完結した JSON 値を取り出します。
-// 取り出せなければ ok が false です。
+// extractJSONValue extracts the first complete JSON value that appears.
+// ok is false if none can be extracted.
 func extractJSONValue(input string) (string, bool) {
 	start, closer := firstJSONStart(input)
 	if start == -1 {
 		return "", false
 	}
 
-	// json.Decoder は文字列リテラルの中の括弧を正しく読み飛ばしたうえで、値が閉じた
-	// 位置で止まります。前後に付いたフェンスや説明文を、括弧を数えずに落とせるのが要点です。
+	// json.Decoder correctly skips brackets inside string literals and stops where the value
+	// closes. The point is that fences or explanations around it can be dropped without counting brackets.
 	var value json.RawMessage
 	if err := json.NewDecoder(strings.NewReader(input[start:])).Decode(&value); err == nil {
 		return string(value), true
 	}
 
-	// LLM が '}' の代わりに ')' などで閉じてしまうケースを補正します。
+	// Correct the case where the LLM closes with ')' or the like instead of '}'.
 	trimmed := strings.TrimRight(input[start:], " \t\n\r)]},;")
 	if repaired := trimmed + closer; json.Valid([]byte(repaired)) {
 		return repaired, true
@@ -78,9 +78,9 @@ func extractJSONValue(input string) (string, bool) {
 	return "", false
 }
 
-// firstJSONStart は最初に現れる JSON 値の開始位置と、対応する閉じ括弧を返します。
-// トップレベルが配列のスキーマ（例: 章立てのリスト）にも対応するため、
-// '{' と '[' の早い方を採用します。
+// firstJSONStart returns the start position of the first JSON value and the matching closing bracket.
+// To also support schemas whose top level is an array (e.g. a list of chapters),
+// whichever of '{' and '[' comes first is used.
 func firstJSONStart(input string) (start int, closer string) {
 	obj := strings.Index(input, "{")
 	arr := strings.Index(input, "[")
@@ -95,23 +95,23 @@ func firstJSONStart(input string) (start int, closer string) {
 	}
 }
 
-// escapeStringLiterals は、文字列リテラルの中の壊れた表記を 1 度の走査で補修します。
+// escapeStringLiterals repairs broken notation inside string literals in a single scan.
 //
-// 直すのは 2 種類で、どちらも「モデルが本文をそのまま JSON へ流し込んだ」ときに出ます。
+// It fixes two kinds, both of which appear when "the model poured a body of text straight into JSON".
 //
-//   - 裸のバックスラッシュ: JSON でバックスラッシュの後に来られるのは "\/bfnrtu だけなので、
-//     それ以外が続く `\X` は、エスケープし忘れた literal なバックスラッシュと一意に
-//     決まります（正規表現の `\d` やパスを引用したときに出ます）。`\X` → `\\X` は情報を
-//     落とさず、解釈が二通りになることもありません。
-//   - 生の制御文字: JSON は文字列の中に U+0020 未満の文字をそのまま置くことを許しません。
-//     その位置に現れてはいけない文字なので、エスケープ表記へ写しても意味は変わりません。
+//   - Bare backslashes: in JSON, only "\/bfnrtu may follow a backslash, so a `\X` followed by
+//     anything else is unambiguously a literal backslash that was not escaped (it appears when
+//     quoting a regular expression's `\d` or a path). `\X` → `\\X` loses no information and
+//     never makes the interpretation ambiguous.
+//   - Raw control characters: JSON does not allow characters below U+0020 as is inside a string.
+//     They are characters that must not appear at that position, so mapping them to an escape does not change the meaning.
 //
-// 2 種類を 1 度の走査で直すのが要点です。別々に 2 度走らせると順序が意味を持ち、
-// 制御文字の補修（`\n` のようにバックスラッシュを足す）を先に行った場合、後から
-// 裸のバックスラッシュを探す走査が足したばかりのエスケープを二重にしてしまいます。
+// The point is fixing both kinds in a single scan. Running two separate scans would make the order
+// matter: if the control-character repair (which adds a backslash, as in `\n`) ran first, the later
+// scan looking for bare backslashes would double the escape that had just been added.
 //
-// 文字列の外は触りません。JSON の構文としてバックスラッシュが現れるのは文字列の中だけで、
-// 外の改行やインデントは整形に使われた正当なものだからです。
+// Nothing outside strings is touched. In JSON syntax, backslashes only appear inside strings, and
+// newlines and indentation outside are legitimate formatting.
 func escapeStringLiterals(input string) string {
 	var b strings.Builder
 	b.Grow(len(input))
@@ -134,15 +134,15 @@ func escapeStringLiterals(input string) string {
 			b.WriteByte(c)
 		case c == '\\':
 			if i+1 < len(input) && isJSONEscape(input[i+1]) {
-				// 正しいエスケープはそのまま通します。ここで 2 バイト進めるのが要点で、
-				// `\\` を 1 バイトずつ見ると 2 つ目を裸のバックスラッシュと誤認し、
-				// `\"` では引用符を文字列の終わりと取り違えます。
+				// Valid escapes pass through as is. Advancing two bytes here is the point: looking at
+				// `\\` one byte at a time would mistake the second for a bare backslash, and with
+				// `\"` the quote would be mistaken for the end of the string.
 				b.WriteByte(c)
 				b.WriteByte(input[i+1])
 				i++
 				continue
 			}
-			// 続きが無効なエスケープ（あるいは末尾）なので、literal として二重にします。
+			// What follows is an invalid escape (or the end), so double it as a literal.
 			b.WriteString(`\\`)
 		case c < 0x20:
 			b.WriteString(controlEscape(c))
@@ -153,9 +153,9 @@ func escapeStringLiterals(input string) string {
 	return b.String()
 }
 
-// controlEscape は、制御文字に対する JSON のエスケープ表記を返します。
-// 短い表記があるものはそちらを使います。ログや成果物を人が読むことがあるので、
-// 改行が 6 桁の \u エスケープで並ぶより `\n` の方が読めます。
+// controlEscape returns the JSON escape notation for a control character.
+// Short forms are used where they exist. People sometimes read logs and outputs, and `\n` is
+// more readable than newlines lined up as six-character \u escapes.
 func controlEscape(c byte) string {
 	switch c {
 	case '\n':
@@ -173,10 +173,10 @@ func controlEscape(c byte) string {
 	}
 }
 
-// isJSONEscape は、バックスラッシュの直後に置ける文字かどうかを返します。
+// isJSONEscape reports whether the character can follow a backslash.
 //
-// \u は続く 4 桁が 16 進である必要がありますが、そこまでは見ません。壊れた \u を
-// 直す一意な方法が無く、触ると別の壊し方をするだけだからです。
+// \u requires the following four characters to be hexadecimal, but that is not checked. There is
+// no unambiguous way to fix a broken \u, and touching it would only break it differently.
 func isJSONEscape(c byte) bool {
 	switch c {
 	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u':

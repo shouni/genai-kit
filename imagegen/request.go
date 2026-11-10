@@ -9,75 +9,74 @@ import (
 	"github.com/shouni/genai-kit/gemini"
 )
 
-// Request は画像生成 1 回分の要求です。
+// Request is a request for one image generation.
 //
-// 参照画像が 1 枚なら参照付きの単発生成、複数なら参照画像を統合した融合生成、
-// 空ならテキストのみの生成になります。枚数が解釈を決めるため、単発と融合で
-// 型を分けません。
+// With one reference image it is a single generation with a reference, with several it is a
+// fused generation combining the reference images, and with none it is text-only generation.
+// The count decides the interpretation, so single and fused generation do not get separate types.
 //
-// 参照画像の指定口は Images と References の 2 つで、併用はできません。gs:// だけを
-// 渡すなら Images が短く書けます。取得済みのバイト列を送る場合や、gs:// とバイト列を
-// 混ぜて順序を指定したい場合は References を使ってください。
+// There are two ways to specify reference images, Images and References, and they cannot be
+// combined. If you only pass gs://, Images is shorter to write. To send already fetched bytes, or
+// to mix gs:// and bytes in a specific order, use References.
 //
-// gemini.GenerateOptions を埋め込んでいるため、SystemPrompt / AspectRatio /
-// ImageSize / Seed / Temperature などの生成パラメータはフィールド昇格でそのまま
-// 設定できます。フィールドを写し取ると gemini 側の追加のたびに 2 か所の同期が
-// 必要になるため、埋め込みにしています。
+// gemini.GenerateOptions is embedded, so generation parameters such as SystemPrompt / AspectRatio /
+// ImageSize / Seed / Temperature can be set directly through field promotion. Copying the fields
+// would require keeping two places in sync every time gemini adds one, so it is embedded.
 //
-// 昇格したフィールドのうち SafetySettings と PersonGeneration は、未指定の場合のみ
-// 次の既定値が補われます。
+// Of the promoted fields, SafetySettings and PersonGeneration are filled with the following
+// defaults only when unspecified.
 //
 //	SafetySettings   → gemini.NewSafetySettings(gemini.SafetyBlockNone)
 //	PersonGeneration → gemini.PersonGenerationAllowAll
 //
-// 安全フィルタは Vertex AI が OFF を受け付けないため BLOCK_NONE、人物生成は
-// キャラクター生成が主用途のため許可が既定です。明示した値は上書きしません。
-// 無条件に上書きすると、利用側が安全フィルタを厳しくする手段が無くなるためです。
+// The safety filter defaults to BLOCK_NONE because Vertex AI does not accept OFF, and person
+// generation defaults to allowed because character generation is the main use. Explicit values
+// are not overwritten; overwriting unconditionally would leave callers no way to make the safety filters stricter.
 type Request struct {
-	// Model は生成に使うモデル名です。必須。
+	// Model is the model name used for generation. Required.
 	Model string
-	// Prompt は生成指示です。NegativePrompt と合わせて空の場合はエラーです。
+	// Prompt is the generation instruction. It is an error if it is empty together with NegativePrompt.
 	Prompt string
-	// NegativePrompt は生成に含めたくない要素です。API のフィールドではなく、
-	// 区切り "\n\n[Negative Prompt]\n" を挟んで Prompt へ連結して送られます。
-	// この見た目は互換性の契約です。下流のプロンプト実装がこの描画に依存しているため、
-	// 区切りの文字列は変わりません。
-	// Prompt と NegativePrompt の両方が（空白を除いて）空ならエラーです。
+	// NegativePrompt is the elements that should not appear in the generation. It is not an API
+	// field; it is joined onto Prompt with the separator "\n\n[Negative Prompt]\n" and sent.
+	// This appearance is a compatibility contract. Downstream prompt implementations depend on this
+	// rendering, so the separator string does not change.
+	// It is an error if both Prompt and NegativePrompt are empty (ignoring whitespace).
 	NegativePrompt string
-	// Images は参照画像の gs:// URI です。並び順はモデルの解釈に影響するため
-	// 保持されます。空文字列の要素はエラーではなく、送信対象から黙って外れます
-	// （「このキャラクターには参照画像が無い」を、呼び出し側が要素の欠落として
-	// 表現できるようにするためです）。
+	// Images are the gs:// URIs of the reference images. Their order affects how the model
+	// interprets them, so it is preserved. Empty-string elements are not an error; they are
+	// silently left out of what is sent (so that callers can express "this character has no
+	// reference image" as a missing element).
 	//
-	// References との併用は ErrConflictingReferences です。2 本のリストの間の順序を
-	// 決める根拠が無く、順序は生成結果を変えるためです。混在させたい場合は
-	// References に一本化してください。
+	// Combining it with References is ErrConflictingReferences. There is no basis for ordering the
+	// two lists against each other, and order changes the result. To mix them, put everything in
+	// References.
 	Images []string
-	// References は参照画像を 1 本の順序付きリストで渡す口です。各要素は gs:// URI
-	// （URI を設定）か、呼び出し側が取得済みのバイト列（Data と MIMEType を設定）の
-	// どちらかです。両方を混ぜた並びも表現できます。
+	// References passes the reference images as one ordered list. Each element is either a gs://
+	// URI (with URI set) or bytes the caller has already fetched (with Data and MIMEType set).
+	// A sequence mixing both can be expressed.
 	//
-	// このパッケージは取得を行いません。http(s) の参照画像を扱うなら、呼び出し側が
-	// 取得の経路・タイムアウト・サイズ上限を決めてバイト列にしてから渡してください。
-	// 取得方法の選択肢をこのパッケージが抽象化して抱えると、使わない依存
-	// （HTTP クライアント、キャッシュ、再圧縮）まで全員に配ることになります。
+	// This package does not fetch. To handle http(s) reference images, the caller decides the
+	// fetch path, timeout and size limit, turns the image into bytes and then passes them.
+	// If this package abstracted over the choice of fetch method, it would hand everyone
+	// dependencies they do not use (an HTTP client, a cache, recompression).
 	//
-	// Images と同じく、送るものが何も無い要素（gemini.Attachment.IsEmpty）は
-	// エラーではなく黙って外れます。Data と URI の併用は gemini 側の検証で
-	// ErrInvalidAttachment になります。
+	// As with Images, elements with nothing to send (gemini.Attachment.IsEmpty) are not an
+	// error and are silently left out. Combining Data and URI becomes ErrInvalidAttachment
+	// through gemini's validation.
 	References []gemini.Attachment
 
 	gemini.GenerateOptions
 }
 
-// preparedRequest は、検証と組み立てを終えて送信できる状態になったリクエストです。
+// preparedRequest is a request that has been validated and assembled, ready to send.
 type preparedRequest struct {
 	model  string
 	prompt string
 	opts   gemini.GenerateOptions
 }
 
-// prepare はリクエストを検証し、送信用の形へ組み立てます。
+// prepare validates the request and assembles it into the form for sending.
 func (c *Client) prepare(req Request) (preparedRequest, error) {
 	if req.Model == "" {
 		return preparedRequest{}, ErrModelRequired
@@ -88,8 +87,8 @@ func (c *Client) prepare(req Request) (preparedRequest, error) {
 	}
 
 	opts := req.GenerateOptions
-	// シードを生成側で決めるのは送信前の1回だけ。toResponse は opts.Seed を
-	// そのまま UsedSeed として返すため、ここで埋めた値が呼び出し側に届く。
+	// The seed is decided on the generator side exactly once, before sending. toResponse returns
+	// opts.Seed as UsedSeed as is, so the value filled in here reaches the caller.
 	if c.autoSeed && opts.Seed == nil {
 		opts.Seed = newSeed()
 	}
@@ -101,13 +100,13 @@ func (c *Client) prepare(req Request) (preparedRequest, error) {
 	}, nil
 }
 
-// negativePromptSeparator は、ネガティブプロンプトをプロンプト本文へ連結する際の区切りです。
+// negativePromptSeparator is the separator used when joining the negative prompt onto the prompt body.
 //
-// この描画は互換性の契約です。ネガティブプロンプトは API のフィールドではなく、
-// 下流のプロンプト実装がこの区切りの見た目に依存しているため、変更しないでください。
+// This rendering is a compatibility contract. The negative prompt is not an API field, and
+// downstream prompt implementations depend on the appearance of this separator, so do not change it.
 const negativePromptSeparator = "\n\n[Negative Prompt]\n"
 
-// buildFinalPrompt はプロンプトとネガティブプロンプトを結合します。
+// buildFinalPrompt joins the prompt and the negative prompt.
 func buildFinalPrompt(prompt, negative string) string {
 	p := strings.TrimSpace(prompt)
 	n := strings.TrimSpace(negative)
@@ -122,26 +121,26 @@ func buildFinalPrompt(prompt, negative string) string {
 	return p + negativePromptSeparator + n
 }
 
-// applyDefaults は、呼び出し側が未指定の項目に既定値を補います。
+// applyDefaults fills in defaults for items the caller left unspecified.
 //
-// 明示された SafetySettings / PersonGeneration は尊重します。無条件に上書きすると、
-// 利用側が安全フィルタを厳しくする手段が無くなるためです。
+// Explicitly set SafetySettings / PersonGeneration are respected. Overwriting unconditionally
+// would leave callers no way to make the safety filters stricter.
 func applyDefaults(opts gemini.GenerateOptions) gemini.GenerateOptions {
 	if opts.SafetySettings == nil {
-		// Vertex AI は OFF を受け付けないため BLOCK_NONE を使います。
+		// Vertex AI does not accept OFF, so BLOCK_NONE is used.
 		opts.SafetySettings = gemini.NewSafetySettings(gemini.SafetyBlockNone)
 	}
-	// キャラクター生成が主用途のため、未指定時は人物生成を許可する。
+	// Character generation is the main use, so person generation is allowed when unspecified.
 	if opts.PersonGeneration == gemini.PersonGenerationUnspecified {
 		opts.PersonGeneration = gemini.PersonGenerationAllowAll
 	}
 	return opts
 }
 
-// referenceAttachments はリクエストの参照画像を送信用の添付へ変換します。
+// referenceAttachments converts the request's reference images into attachments for sending.
 //
-// Images は References へ寄せてから 1 本の経路で検証します。指定口ごとに規則を
-// 書き分けると、空要素の扱いのような細部が口ごとにずれるためです。
+// Images is folded into References and then validated on a single path. Writing rules
+// separately per input would let details such as handling empty elements drift between them.
 func referenceAttachments(req Request) ([]gemini.Attachment, error) {
 	if len(req.Images) > 0 && len(req.References) > 0 {
 		return nil, ErrConflictingReferences
@@ -157,13 +156,13 @@ func referenceAttachments(req Request) ([]gemini.Attachment, error) {
 
 	attachments := make([]gemini.Attachment, 0, len(refs))
 	for _, ref := range refs {
-		// 参照先を持たない要素は送るものが無いので落とす（理由は Request.Images を参照）。
+		// An element with no reference has nothing to send, so drop it (see Request.Images for why).
 		if ref.IsEmpty() {
 			continue
 		}
 
-		// バイト列は呼び出し側が取得済みのもの。MIME type はバイト列からは決まらず、
-		// 誤った申告は受け取り側の解釈を壊すため、推測せず必須にする。
+		// Bytes are what the caller has already fetched. The MIME type cannot be determined from bytes,
+		// and a wrong declaration breaks the receiver's interpretation, so it is required rather than guessed.
 		if len(ref.Data) > 0 {
 			if ref.MIMEType == "" {
 				return nil, ErrMissingReferenceMIMEType
@@ -175,8 +174,8 @@ func referenceAttachments(req Request) ([]gemini.Attachment, error) {
 		if !isGCSURI(ref.URI) {
 			return nil, fmt.Errorf("%w: %q", ErrUnsupportedReference, ref.URI)
 		}
-		// URI の MIME type は任意。拡張子から分かるなら添えて、分からなければ
-		// サーバー側の判定に委ねる（理由は mimeTypeByPath を参照）。
+		// A URI's MIME type is optional. Attach it if the extension tells, otherwise leave it to the
+		// server's detection (see mimeTypeByPath for why).
 		if ref.MIMEType == "" {
 			ref.MIMEType = mimeTypeByPath(ref.URI)
 		}
@@ -186,16 +185,16 @@ func referenceAttachments(req Request) ([]gemini.Attachment, error) {
 	return attachments, nil
 }
 
-// newSeed は自動シード採番用の乱数シードを返します。
+// newSeed returns a random seed for automatic seeding.
 //
-// gemini が int32 の範囲外を弾く（ErrInvalidSeed）ため、範囲内に収めます。
+// gemini refuses values outside int32 (ErrInvalidSeed), so it stays within range.
 func newSeed() *int64 {
 	seed := rand.Int64N(math.MaxInt32)
 	return &seed
 }
 
-// seedOrZero は *int64 を安全にデリファレンスします。
-// nil（WithoutAutoSeed でシードも未指定）は 0 になります。
+// seedOrZero dereferences *int64 safely.
+// nil (WithoutAutoSeed with no seed specified either) becomes 0.
 func seedOrZero(seed *int64) int64 {
 	if seed == nil {
 		return 0

@@ -4,104 +4,104 @@ import (
 	"google.golang.org/genai"
 )
 
-// PersonGeneration は人物生成の許可設定を表すカスタム型です。
+// PersonGeneration is a custom type for the person generation permission setting.
 type PersonGeneration string
 
 const (
-	// PersonGenerationUnspecified は設定を省略し、API のデフォルトに委ねます。
+	// PersonGenerationUnspecified omits the setting and leaves it to the API default.
 	PersonGenerationUnspecified PersonGeneration = ""
-	// PersonGenerationAllowAll はすべての人物生成を許可します（キャラクター生成に推奨）。
+	// PersonGenerationAllowAll allows all person generation (recommended for character generation).
 	PersonGenerationAllowAll PersonGeneration = "ALLOW_ALL"
-	// PersonGenerationAllowAdult は成人のみの生成を許可します（SDKデフォルト）。
+	// PersonGenerationAllowAdult allows generating adults only (the SDK default).
 	PersonGenerationAllowAdult PersonGeneration = "ALLOW_ADULT"
-	// PersonGenerationDontAllow は人物の生成を許可しません。
+	// PersonGenerationDontAllow does not allow generating people.
 	PersonGenerationDontAllow PersonGeneration = "DONT_ALLOW"
 )
 
-// GenerateOptions は各生成リクエストごとのオプションです。
+// GenerateOptions are the options for each generation request.
 //
-// ポインタ型のフィールドは「未設定」と「明示的なゼロ値」を区別するためのものです。
-// 例えば Temperature は 0（決定的な出力）が意味を持つ値なので、nil のときだけ
-// SDK のデフォルトに委ねます。設定には new(式) を使います。
+// Pointer fields distinguish "unset" from "an explicit zero value".
+// For example, Temperature 0 (deterministic output) is a meaningful value, so only nil leaves
+// it to the SDK default. Use new(expr) to set them.
 //
 //	opts := gemini.GenerateOptions{Temperature: new(float32(0))}
 type GenerateOptions struct {
 	SystemPrompt string
 
-	// --- サンプリングパラメータ ---
+	// --- Sampling parameters ---
 
-	// Temperature は出力のランダム性です（0 で最も決定的）。nil で SDK デフォルト。
+	// Temperature is the randomness of the output (0 is the most deterministic). nil means the SDK default.
 	Temperature *float32
-	// TopP は核サンプリングの閾値です。nil で SDK デフォルト。
+	// TopP is the nucleus sampling threshold. nil means the SDK default.
 	TopP *float32
-	// TopK は上位 K 個からのサンプリング数です。nil で SDK デフォルト。
+	// TopK is the number of top-K candidates to sample from. nil means the SDK default.
 	TopK *float32
-	// MaxOutputTokens は生成する最大トークン数です。0 で SDK デフォルト。
+	// MaxOutputTokens is the maximum number of tokens to generate. 0 means the SDK default.
 	MaxOutputTokens int32
-	// StopSequences は生成を打ち切る文字列のリストです。
+	// StopSequences is a list of strings that stop generation.
 	StopSequences []string
 
-	// --- 思考 (Gemini 2.5 以降) ---
+	// --- Thinking (Gemini 2.5 and later) ---
 
-	// ThinkingBudget は思考に使うトークン数の上限です。
-	// 0 を明示すると思考を無効化し、レイテンシとコストを抑えられます。
-	// nil ではモデルのデフォルトに委ねます。
+	// ThinkingBudget is the maximum number of tokens used for thinking.
+	// Setting 0 explicitly disables thinking, keeping latency and cost down.
+	// nil leaves it to the model's default.
 	//
-	// 有効なトークン数の範囲はモデルごとに異なります。モデルを跨いで使う場合は
-	// ThinkingLevel のほうが移植性があります。
+	// The valid token range differs per model. When used across models,
+	// ThinkingLevel is more portable.
 	ThinkingBudget *int32
-	// ThinkingLevel は思考量を段階で指定します（MINIMAL / LOW / MEDIUM / HIGH）。
-	// ThinkingBudget のトークン数指定に対し、モデル非依存で扱えるのが利点です。
+	// ThinkingLevel specifies the amount of thinking as a level (MINIMAL / LOW / MEDIUM / HIGH).
+	// Compared with ThinkingBudget's token count, its advantage is being model-independent.
 	//
-	// ThinkingBudget と ThinkingLevel は排他的な指定方法です。
-	// 両方を設定した場合は ThinkingLevel を優先し、ThinkingBudget は送信しません。
+	// ThinkingBudget and ThinkingLevel are mutually exclusive ways to specify it.
+	// When both are set, ThinkingLevel takes precedence and ThinkingBudget is not sent.
 	ThinkingLevel genai.ThinkingLevel
-	// IncludeThoughts を true にすると思考サマリが返され、Response.Thoughts で取得できます。
+	// IncludeThoughts, when true, returns the thought summary, available as Response.Thoughts.
 	IncludeThoughts bool
 
-	// --- 画像生成 (Nano Banana / Imagen) 特有のパラメータ ---
+	// --- Parameters specific to image generation (Nano Banana / Imagen) ---
 
-	// AspectRatio は生成画像の縦横比です（例: "16:9"）。空で API デフォルト。
+	// AspectRatio is the aspect ratio of the generated image (e.g. "16:9"). Empty means the API default.
 	AspectRatio string
-	// ImageSize は生成画像の解像度指定です（例: "1K"）。空で API デフォルト。
+	// ImageSize is the resolution of the generated image (e.g. "1K"). Empty means the API default.
 	ImageSize string
-	// Seed は再現性のためのシード値です。int32 の範囲外を指定すると
-	// ErrInvalidSeed になります。nil で API に委ねます。
+	// Seed is the seed value for reproducibility. A value outside the int32 range results in
+	// ErrInvalidSeed. nil leaves it to the API.
 	Seed *int64
-	// PersonGeneration は人物生成の許可設定です。
+	// PersonGeneration is the person generation permission setting.
 	PersonGeneration PersonGeneration
 
-	// SafetySettings は安全フィルタの設定です。NewSafetySettings で組み立てられます。
+	// SafetySettings are the safety filter settings. They can be built with NewSafetySettings.
 	SafetySettings []*genai.SafetySetting
-	// ResponseMIMEType は期待するレスポンスの MIME type です
-	// （"application/json" / "image/png" / "audio/wav" など）。
+	// ResponseMIMEType is the expected MIME type of the response
+	// ("application/json" / "image/png" / "audio/wav", etc.).
 	ResponseMIMEType string
-	// ResponseSchema は構造化出力のスキーマです。ResponseMIMEType "application/json" と
-	// 併用すると、モデル出力が文法レベルでスキーマに制約され、JSON 以外の
-	// 余計なテキストが混入しなくなります。
+	// ResponseSchema is the structured-output schema. Used together with ResponseMIMEType
+	// "application/json", it constrains the model output to the schema at the grammar level,
+	// so no extra non-JSON text gets mixed in.
 	ResponseSchema *genai.Schema
-	// ResponseJSONSchema は、標準的な JSON Schema による構造化出力の指定です。
-	// $ref を含むような複雑なスキーマで ResponseSchema がうまく機能しない場合の
-	// 代替として使用します。
+	// ResponseJSONSchema specifies structured output with a standard JSON Schema.
+	// Use it as an alternative when ResponseSchema does not work well with a complex schema,
+	// such as one containing $ref.
 	//
-	// ResponseSchema と ResponseJSONSchema は排他的な指定方法です。
-	// 両方を設定した場合は ResponseJSONSchema を優先し、ResponseSchema は送信しません。
+	// ResponseSchema and ResponseJSONSchema are mutually exclusive ways to specify it.
+	// When both are set, ResponseJSONSchema takes precedence and ResponseSchema is not sent.
 	ResponseJSONSchema any
 
-	// OutputURIPrefix を設定すると、生成された画像などのメディアを API が GCS へ直接書き込み、
-	// レスポンスにはバイト列の代わりに書き込み先の URI が返ります（Vertex AI のみ）。
-	// "gs://bucket/prefix/" の形で指定し、gs:// 以外は ErrInvalidOutputURIPrefix です。
+	// OutputURIPrefix, when set, makes the API write generated media such as images directly to GCS,
+	// and the response returns the destination URI instead of bytes (Vertex AI only).
+	// Specify it as "gs://bucket/prefix/"; anything other than gs:// is ErrInvalidOutputURIPrefix.
 	//
-	// 返った URI は Response.Attachments の URI に入り、Data は空です。Images / Audios は
-	// バイト列だけを集めるため、この指定をすると空になります。保存先が GCS なら、バイト列が
-	// レスポンスを往復して呼び出し側がアップロードし直す手間が無くなります。
+	// The returned URI goes into the URI of Response.Attachments, and Data is empty. Images / Audios
+	// collect bytes only, so with this set they are empty. If the destination is GCS anyway, this
+	// saves the bytes round-tripping through the response only for the caller to upload them again.
 	//
-	// API キー経由では SDK が送信前にエラーにし、InteractionsGenerator では
-	// ErrUnsupportedOption です。
+	// Through an API key, the SDK returns an error before sending, and with InteractionsGenerator it is
+	// ErrUnsupportedOption.
 	OutputURIPrefix string
 }
 
-// HasImageConfig は、画像生成特有のパラメータが1つでも設定されているかを判定します。
+// HasImageConfig reports whether at least one image-generation-specific parameter is set.
 func (o *GenerateOptions) HasImageConfig() bool {
 	if o == nil {
 		return false
@@ -109,43 +109,43 @@ func (o *GenerateOptions) HasImageConfig() bool {
 	return o.AspectRatio != "" || o.ImageSize != "" || o.PersonGeneration != PersonGenerationUnspecified
 }
 
-// ThinkingLevel は、思考量の段階指定です（genai.ThinkingLevel の別名）。
+// ThinkingLevel is the level of thinking (an alias of genai.ThinkingLevel).
 type ThinkingLevel = genai.ThinkingLevel
 
-// 思考量の段階です。
+// Thinking levels.
 const (
-	// ThinkingUnspecified はモデルのデフォルトに委ねます。
+	// ThinkingUnspecified leaves it to the model's default.
 	ThinkingUnspecified ThinkingLevel = genai.ThinkingLevelUnspecified
-	// ThinkingMinimal は思考をほぼ行わず、レイテンシとコストを最小化します。
+	// ThinkingMinimal does almost no thinking, minimising latency and cost.
 	ThinkingMinimal ThinkingLevel = genai.ThinkingLevelMinimal
-	// ThinkingLow は軽い思考を行います。
+	// ThinkingLow does light thinking.
 	ThinkingLow ThinkingLevel = genai.ThinkingLevelLow
-	// ThinkingMedium は中程度の思考を行います。
+	// ThinkingMedium does a moderate amount of thinking.
 	ThinkingMedium ThinkingLevel = genai.ThinkingLevelMedium
-	// ThinkingHigh は最も深い思考を行います。品質は上がりますが遅く高価です。
+	// ThinkingHigh does the deepest thinking. Quality goes up, but it is slow and expensive.
 	ThinkingHigh ThinkingLevel = genai.ThinkingLevelHigh
 )
 
-// SafetyThreshold は、安全フィルタのブロック閾値です（genai.HarmBlockThreshold の別名）。
+// SafetyThreshold is the safety filter's block threshold (an alias of genai.HarmBlockThreshold).
 type SafetyThreshold = genai.HarmBlockThreshold
 
-// 安全フィルタのブロック閾値です。
+// Safety filter block thresholds.
 const (
-	// SafetyBlockNone は、安全フィルタによるブロックを行いません。
+	// SafetyBlockNone does not block by safety filter.
 	SafetyBlockNone SafetyThreshold = genai.HarmBlockThresholdBlockNone
-	// SafetyBlockLowAndAbove は、低リスク以上をブロックする最も厳しい設定です。
+	// SafetyBlockLowAndAbove blocks low risk and above, the strictest setting.
 	SafetyBlockLowAndAbove SafetyThreshold = genai.HarmBlockThresholdBlockLowAndAbove
-	// SafetyBlockMediumAndAbove は、中リスク以上をブロックします。
+	// SafetyBlockMediumAndAbove blocks medium risk and above.
 	SafetyBlockMediumAndAbove SafetyThreshold = genai.HarmBlockThresholdBlockMediumAndAbove
-	// SafetyBlockOnlyHigh は、高リスクのみをブロックします。
+	// SafetyBlockOnlyHigh blocks high risk only.
 	SafetyBlockOnlyHigh SafetyThreshold = genai.HarmBlockThresholdBlockOnlyHigh
 )
 
-// Schema は、構造化出力（GenerateOptions.ResponseSchema）のスキーマです（genai.Schema の別名）。
+// Schema is the schema for structured output (GenerateOptions.ResponseSchema) (an alias of genai.Schema).
 //
-// map[string]any で書く ResponseJSONSchema と違い、フィールド名がコンパイル時に
-// 検査されます。JSON Schema の $ref のようにこの型で表現しきれない場合にだけ
-// ResponseJSONSchema を選んでください。
+// Unlike ResponseJSONSchema, written as map[string]any, field names are checked at compile
+// time. Choose ResponseJSONSchema only when this type cannot express what you need, such as
+// JSON Schema's $ref.
 //
 //	opts := gemini.GenerateOptions{
 //		ResponseMIMEType: "application/json",
@@ -159,28 +159,28 @@ const (
 //	}
 type Schema = genai.Schema
 
-// SchemaType は、スキーマのデータ型です（genai.Type の別名）。
+// SchemaType is the data type in a schema (an alias of genai.Type).
 type SchemaType = genai.Type
 
-// スキーマのデータ型です。
+// Schema data types.
 const (
-	// TypeString は文字列です。
+	// TypeString is a string.
 	TypeString SchemaType = genai.TypeString
-	// TypeNumber は浮動小数点数です。
+	// TypeNumber is a floating-point number.
 	TypeNumber SchemaType = genai.TypeNumber
-	// TypeInteger は整数です。
+	// TypeInteger is an integer.
 	TypeInteger SchemaType = genai.TypeInteger
-	// TypeBoolean は真偽値です。
+	// TypeBoolean is a boolean.
 	TypeBoolean SchemaType = genai.TypeBoolean
-	// TypeArray は配列です。要素の型は Items で指定します。
+	// TypeArray is an array. The element type is specified with Items.
 	TypeArray SchemaType = genai.TypeArray
-	// TypeObject はオブジェクトです。フィールドは Properties で指定します。
+	// TypeObject is an object. Its fields are specified with Properties.
 	TypeObject SchemaType = genai.TypeObject
 )
 
-// NewSafetySettings は、標準的な4つのハームカテゴリ（暴力・ヘイト・性的表現・危険行為）
-// すべてに同一の閾値を適用した SafetySetting のスライスを返します。
-// 閾値を用途に応じてどう選ぶかは呼び出し側の判断に委ねます。
+// NewSafetySettings returns a slice of SafetySetting applying the same threshold to all four
+// standard harm categories (violence, hate, sexual content, dangerous content).
+// How to choose the threshold for a given use is left to the caller.
 func NewSafetySettings(threshold SafetyThreshold) []*genai.SafetySetting {
 	return []*genai.SafetySetting{
 		{Category: genai.HarmCategoryHarassment, Threshold: threshold},

@@ -14,12 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDoCallerCancelDoesNotKillSharedExecution は、リーダー（最初の呼び出し元）が
-// キャンセルしても共有実行が打ち切られず、相乗りしている呼び出し元が完走できることを
-// 検証します。
+// TestDoCallerCancelDoesNotKillSharedExecution checks that when the leader (the first caller)
+// cancels, the shared execution is not cut off, and the callers sharing it can run to
+// completion.
 //
-// 実行用 context をクロージャの外で切り離すと、リーダーの defer cancel() が共有実行を
-// 巻き添えにするため、このテストは失敗します。
+// If the execution context were detached outside the closure, the leader's defer cancel() would
+// take the shared execution down with it, and this test fails.
 func TestDoCallerCancelDoesNotKillSharedExecution(t *testing.T) {
 	t.Parallel()
 
@@ -39,7 +39,7 @@ func TestDoCallerCancelDoesNotKillSharedExecution(t *testing.T) {
 			}
 		}
 
-		// リーダー A: 実行開始後にキャンセルする。
+		// Leader A: cancels after execution starts.
 		ctxA, cancelA := context.WithCancel(context.Background())
 		errA := make(chan error, 1)
 		go func() {
@@ -48,7 +48,7 @@ func TestDoCallerCancelDoesNotKillSharedExecution(t *testing.T) {
 		}()
 		<-started
 
-		// 相乗り B: 同一キーで in-flight に合流し、完走を期待する。
+		// Joiner B: joins the in-flight call with the same key and is expected to complete.
 		type result struct {
 			val string
 			err error
@@ -59,19 +59,19 @@ func TestDoCallerCancelDoesNotKillSharedExecution(t *testing.T) {
 			resB <- result{v, err}
 		}()
 
-		synctest.Wait() // B が合流するまで待つ
+		synctest.Wait() // wait for B to join
 		cancelA()
 		require.ErrorIs(t, <-errA, context.Canceled)
 
 		close(release)
 		r := <-resB
-		require.NoError(t, r.err, "リーダーのキャンセルで共有実行が巻き添えになっています")
+		require.NoError(t, r.err, "the leader's cancellation took the shared execution down with it")
 		require.Equal(t, "ok", r.val)
 	})
 }
 
-// TestDoDeduplicatesConcurrentCalls は、同一キーの同時呼び出しが 1 回にまとまり、
-// 別キーはまとまらないことを検証します。
+// TestDoDeduplicatesConcurrentCalls checks that concurrent calls with the same key collapse into
+// one, and that different keys do not.
 func TestDoDeduplicatesConcurrentCalls(t *testing.T) {
 	t.Parallel()
 
@@ -93,25 +93,25 @@ func TestDoDeduplicatesConcurrentCalls(t *testing.T) {
 		wg.Go(func() { _, _ = Do(context.Background(), &group, nil, "other", fn) })
 
 		synctest.Wait()
-		assert.Equal(t, int32(2), calls.Load(), "同一キーは 1 回、別キーはもう 1 回")
+		assert.Equal(t, int32(2), calls.Load(), "once for the same key, once more for the other key")
 
 		close(release)
 		wg.Wait()
 	})
 }
 
-// TestDoWaitsForRateIntervalOutsideExecTimeout は、発射間隔の待機が 1 回あたりの
-// 上限時間に数えられないことを検証します。
+// TestDoWaitsForRateIntervalOutsideExecTimeout checks that waiting for the firing interval is
+// not counted in the per-call time limit.
 //
-// 数えてしまうと、混雑しているだけでタイムアウトします。上限時間より長く待たされた
-// 2 本目が、実行そのものは一瞬でも失敗するようになります。
+// If it were counted, calls would time out merely from congestion. A second call kept waiting
+// longer than the time limit would fail even though the execution itself takes an instant.
 func TestDoWaitsForRateIntervalOutsideExecTimeout(t *testing.T) {
 	t.Parallel()
 
 	synctest.Test(t, func(t *testing.T) {
 		const interval = 10 * time.Second
-		// 上限時間を発射間隔よりずっと短くする。待機がこれに数えられるなら
-		// 2 本目は DeadlineExceeded で落ちる。
+		// Make the time limit much shorter than the firing interval. If the wait counted toward
+		// it, the second call would fail with DeadlineExceeded.
 		guard := New(WithRateInterval(interval), WithExecTimeout(time.Second))
 
 		var group Group
@@ -130,15 +130,15 @@ func TestDoWaitsForRateIntervalOutsideExecTimeout(t *testing.T) {
 		wg.Wait()
 
 		require.NoError(t, errs[0])
-		require.NoError(t, errs[1], "発射間隔の待機が上限時間に数えられています")
+		require.NoError(t, errs[1], "the firing-interval wait is counted in the time limit")
 
-		// どちらか一方は 1 周期ぶん待たされている。
-		assert.GreaterOrEqual(t, max(elapsed[0], elapsed[1]), interval, "発射間隔が効いていません")
+		// One of the two was kept waiting for one period.
+		assert.GreaterOrEqual(t, max(elapsed[0], elapsed[1]), interval, "the firing interval is not applied")
 	})
 }
 
-// TestDoAppliesExecTimeout は、共有実行が上限時間で打ち切られることを検証します。
-// 共有実行は呼び出し元から切り離されるため、これが唯一の打ち切り手段です。
+// TestDoAppliesExecTimeout checks that a shared execution is cut off at the time limit.
+// A shared execution is detached from its callers, so this is the only way to cut it off.
 func TestDoAppliesExecTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -156,7 +156,7 @@ func TestDoAppliesExecTimeout(t *testing.T) {
 	})
 }
 
-// TestDoPropagatesError は、共有実行の失敗が相乗りした全員へ届くことを検証します。
+// TestDoPropagatesError checks that a failure of the shared execution reaches everyone sharing it.
 func TestDoPropagatesError(t *testing.T) {
 	t.Parallel()
 
@@ -169,9 +169,9 @@ func TestDoPropagatesError(t *testing.T) {
 	require.ErrorIs(t, err, sentinel)
 }
 
-// TestDoSkipsExecutionWhenContextAlreadyDone は、すでに終わっている ctx では fn を
-// 実行しないことを検証します。実行は呼び出し元から切り離されるため、ここで止めないと
-// 結果を受け取る者のいない課金呼び出しが走ります。
+// TestDoSkipsExecutionWhenContextAlreadyDone checks that fn is not run with a ctx that is
+// already done. Execution is detached from the caller, so unless it stops here, a billed call
+// runs with nobody to receive the result.
 func TestDoSkipsExecutionWhenContextAlreadyDone(t *testing.T) {
 	t.Parallel()
 
@@ -190,12 +190,12 @@ func TestDoSkipsExecutionWhenContextAlreadyDone(t *testing.T) {
 		}
 
 		synctest.Wait()
-		require.Zero(t, calls.Load(), "キャンセル済みの ctx で fn が実行されています")
+		require.Zero(t, calls.Load(), "fn ran with a cancelled ctx")
 	})
 }
 
-// TestDoRecoversPanic は、fn の panic がプロセスを落とさず ErrPanicked として
-// 相乗りした全員へ届くことを検証します。
+// TestDoRecoversPanic checks that a panic in fn does not bring the process down and reaches
+// everyone sharing the call as ErrPanicked.
 func TestDoRecoversPanic(t *testing.T) {
 	t.Parallel()
 
@@ -215,7 +215,7 @@ func TestDoRecoversPanic(t *testing.T) {
 			}()
 		}
 
-		synctest.Wait() // 2 人目が合流するまで待つ
+		synctest.Wait() // wait for the second caller to join
 		close(release)
 
 		for range 2 {
@@ -226,8 +226,8 @@ func TestDoRecoversPanic(t *testing.T) {
 	})
 }
 
-// TestNilGuardUsesDefaults は、nil の Guard が「制限なし・既定の上限時間」として
-// 扱えることを検証します。呼び出し側に分岐を持たせないためです。
+// TestNilGuardUsesDefaults checks that a nil Guard can be treated as "no limits, default
+// time limit". This keeps callers free of branches.
 func TestNilGuardUsesDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -240,9 +240,9 @@ func TestNilGuardUsesDefaults(t *testing.T) {
 	assert.NoError(t, New(WithRateInterval(0)).wait(context.Background()))
 }
 
-// TestKeyIncludesSeed は、seed がキーに含まれることを検証します。
-// 含まれないと、同一プロンプトで seed 違いの同時呼び出しが 1 回の生成結果を
-// 共有してしまい、seed による出力の作り分けが効かなくなります。
+// TestKeyIncludesSeed checks that the seed is part of the key.
+// Otherwise, concurrent calls with the same prompt but different seeds would share the result
+// of one generation, and producing different outputs per seed would stop working.
 func TestKeyIncludesSeed(t *testing.T) {
 	t.Parallel()
 
@@ -253,33 +253,33 @@ func TestKeyIncludesSeed(t *testing.T) {
 	keyA := Key("lyrics", "model", "prompt", SeedKey(&seedA))
 	keyB := Key("lyrics", "model", "prompt", SeedKey(&seedB))
 
-	assert.NotEqual(t, keyA, keyB, "seed 違いで同じキーになっています")
-	assert.NotEqual(t, keyA, keyNil, "seed 指定ありと nil で同じキーになっています")
-	assert.NotEqual(t, keyB, keyNil, "seed 指定ありと nil で同じキーになっています")
+	assert.NotEqual(t, keyA, keyB, "different seeds produce the same key")
+	assert.NotEqual(t, keyA, keyNil, "a specified seed and nil produce the same key")
+	assert.NotEqual(t, keyB, keyNil, "a specified seed and nil produce the same key")
 
-	// 同一入力では安定していること（安定しないと重複排除が効かない）。
+	// Stable for the same input (otherwise deduplication would not work).
 	assert.Equal(t, keyA, Key("lyrics", "model", "prompt", SeedKey(&seedA)))
 }
 
-// TestKeyPartsAreUnambiguous は、部品の境界が曖昧にならないことを検証します。
-// 長さプレフィックスが無いと "ab"+"c" と "a"+"bc" が同じキーになり、
-// 別の内容の生成が 1 回にまとめられます。
+// TestKeyPartsAreUnambiguous checks that the boundaries between parts are unambiguous.
+// Without a length prefix, "ab"+"c" and "a"+"bc" would give the same key, and generations
+// with different content would be collapsed into one.
 func TestKeyPartsAreUnambiguous(t *testing.T) {
 	t.Parallel()
 
 	assert.NotEqual(t, Key("ns", "ab", "c"), Key("ns", "a", "bc"))
 	assert.NotEqual(t, Key("ns", "", "abc"), Key("ns", "abc", ""))
-	assert.NotEqual(t, Key("a", "x"), Key("b", "x"), "namespace が違えば別キー")
-	assert.True(t, len(Key("ns")) > len("ns:"), "namespace はキーの接頭辞として残る")
+	assert.NotEqual(t, Key("a", "x"), Key("b", "x"), "a different namespace gives a different key")
+	assert.True(t, len(Key("ns")) > len("ns:"), "the namespace remains as the key prefix")
 }
 
-// TestWriteHashPartSharesKeyFraming は、WriteHashPart と Key が同じ枠組み
-// （長さプレフィックス）を使っていることを検証します。枠組みが分かれると、
-// 画像バイト列を直接ハッシュする経路だけが衝突しやすくなります。
+// TestWriteHashPartSharesKeyFraming checks that WriteHashPart and Key use the same framing
+// (a length prefix). If the framing diverged, only the path that hashes image bytes directly
+// would become more prone to collisions.
 func TestWriteHashPartSharesKeyFraming(t *testing.T) {
 	t.Parallel()
 
-	// Key と同じハッシュ関数を使って、枠組みだけを比べます。
+	// Using the same hash function as Key, compare only the framing.
 	hashOf := func(parts ...[]byte) string {
 		h := sha256.New()
 		for _, p := range parts {
@@ -291,7 +291,7 @@ func TestWriteHashPartSharesKeyFraming(t *testing.T) {
 	assert.NotEqual(t,
 		hashOf([]byte("ab"), []byte("c")),
 		hashOf([]byte("a"), []byte("bc")),
-		"長さプレフィックスが効いていません")
+		"the length prefix is not applied")
 	assert.Equal(t,
 		hashOf([]byte("ab"), []byte("c")),
 		hashOf([]byte("ab"), []byte("c")))

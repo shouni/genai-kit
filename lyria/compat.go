@@ -5,33 +5,33 @@ import (
 	"github.com/shouni/genai-kit/music"
 )
 
-// 楽曲構成のデータ型は music パッケージへ分離されています。
+// The data types for a song's structure have been split out into the music package.
 //
-// 型だけが欲しい下流（動画生成・履歴表示など）がワークフロー本体（レート制限や
-// singleflight を伴うこのパッケージ）を輸入せずに済むようにするためです。
-// ここでの別名は既存の lyria.MusicRecipe 等の表記をそのまま使い続けられるように
-// する互換層で、どちらの名前で書いても同じ型です。
-// 型そのものの説明は music 側にあります。ここへ書き写すと必ずずれます。
+// This lets downstream code that only wants the types (video generation, history display, etc.)
+// avoid importing the workflow itself (this package, with its rate limiting and singleflight).
+// The aliases here are a compatibility layer so that existing spellings such as lyria.MusicRecipe
+// keep working; whichever name is used, it is the same type.
+// The types themselves are documented in music. Copying that here would inevitably drift.
 type (
-	// AIModels は music.AIModels の別名です。
+	// AIModels is an alias of music.AIModels.
 	AIModels = music.AIModels
-	// LyricsDraft は music.LyricsDraft の別名です。
+	// LyricsDraft is an alias of music.LyricsDraft.
 	LyricsDraft = music.LyricsDraft
-	// MusicRecipe は music.Recipe の別名です。
+	// MusicRecipe is an alias of music.Recipe.
 	MusicRecipe = music.Recipe
-	// MusicSection は music.Section の別名です。
+	// MusicSection is an alias of music.Section.
 	MusicSection = music.Section
 )
 
-// LangJapanese と LangEnglish は MusicRecipe.Lang に指定できる言語コードです。
+// LangJapanese and LangEnglish are the language codes that can be set on MusicRecipe.Lang.
 const (
 	LangJapanese = music.LangJapanese
 	LangEnglish  = music.LangEnglish
 )
 
-// ImagePayload は、音声生成に添えられる任意のマルチモーダル画像入力です。
+// ImagePayload is optional multimodal image input attached to audio generation.
 //
-// gemini.Attachment の別名です。「MIME type とバイト列」という同じ概念を 2 か所で定義すると、
-// 呼び出し側が同じ内容を詰め替える羽目になります。別名にしてあるので、既存の
-// lyria.ImagePayload{Data: ..., MIMEType: ...} はそのまま書けます。
+// It is an alias of gemini.Attachment. Defining the same concept, "a MIME type and bytes", in two
+// places would force callers to copy the same content from one to the other. Because it is an alias,
+// existing code such as lyria.ImagePayload{Data: ..., MIMEType: ...} can be written as is.
 type ImagePayload = gemini.Attachment

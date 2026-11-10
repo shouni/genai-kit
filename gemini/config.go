@@ -12,81 +12,81 @@ import (
 )
 
 var (
-	// ErrConfigRequired は、ProjectID/LocationID と APIKey のいずれも設定されていない場合に返されます。
+	// ErrConfigRequired is returned when neither ProjectID/LocationID nor APIKey is set.
 	ErrConfigRequired = errors.New("gemini: either ProjectID/LocationID or APIKey is required")
-	// ErrExclusiveConfig は、ProjectID/LocationID と APIKey が同時に設定された場合に返されます。
+	// ErrExclusiveConfig is returned when ProjectID/LocationID and APIKey are set at the same time.
 	ErrExclusiveConfig = errors.New("gemini: ProjectID/LocationID and APIKey are mutually exclusive")
-	// ErrIncompleteVertexConfig は、ProjectID と LocationID の一方のみが設定された場合に返されます。
+	// ErrIncompleteVertexConfig is returned when only one of ProjectID and LocationID is set.
 	ErrIncompleteVertexConfig = errors.New("gemini: Vertex AI requires both ProjectID and LocationID")
 )
 
 const (
-	// DefaultMaxRetries は、リトライ回数が未設定の場合に使用されるデフォルト値です。
+	// DefaultMaxRetries is the default used when the retry count is unset.
 	DefaultMaxRetries uint = 1
-	// DefaultInitialDelay は、初期リトライ間隔が未設定の場合に使用されるデフォルト値です。
+	// DefaultInitialDelay is the default used when the initial retry delay is unset.
 	DefaultInitialDelay time.Duration = 30 * time.Second
-	// DefaultMaxDelay は、最大リトライ間隔が未設定の場合に使用されるデフォルト値です。
+	// DefaultMaxDelay is the default used when the maximum retry delay is unset.
 	DefaultMaxDelay time.Duration = 120 * time.Second
 )
 
-// Config は初期化用の設定です。
+// Config is the configuration for initialisation.
 //
-// 通常は Vertex AI を使います。ProjectID と LocationID を指定し、認証は
-// Application Default Credentials (ADC) に従います。APIKey はそれが選べない
-// モデルのための暫定的な例外です。
+// Normally Vertex AI is used: specify ProjectID and LocationID, and authentication follows
+// Application Default Credentials (ADC). APIKey is a temporary exception for models that
+// cannot be used that way.
 type Config struct {
 	ProjectID  string // Google Cloud Project ID
 	LocationID string // Location (e.g., "us-central1")
 
-	// APIKey は Gemini API (Google AI Studio) バックエンドを使う場合のキーです。
-	// ProjectID/LocationID とは排他で、指定するとバックエンドが切り替わります。
+	// APIKey is the key for using the Gemini API (Google AI Studio) backend.
+	// It is mutually exclusive with ProjectID/LocationID, and setting it switches the backend.
 	//
-	// 暫定的な例外です。このライブラリのバックエンドは Vertex AI に寄せてあり、
-	// 呼び出し側がどちらを使っているか意識せずに済むことに価値があります。それでも
-	// 残しているのは、最新の Lyria が Vertex AI では提供されておらず、音楽生成だけが
-	// API キー経路でしか動かないためです。Vertex AI で使えるようになった時点で、
-	// このフィールドと validate / toClientConfig の分岐ごと削除してください。
+	// It is a temporary exception. This library's backend has been consolidated on Vertex AI, and
+	// the value lies in callers not having to know which one they are using. It remains only
+	// because the latest Lyria is not offered on Vertex AI, so music generation alone runs only on
+	// the API key path. Once Lyria is available on Vertex AI, delete this field together with the
+	// branches in validate / toClientConfig.
 	APIKey string
 
-	// MaxRetries は、1 回の呼び出しで許すリトライの回数です（初回実行は含みません）。
-	// 0 は未設定で、DefaultMaxRetries を使います。リトライを止めたい場合は
-	// DisableRetry を立ててください。
+	// MaxRetries is the number of retries allowed for one call (the first attempt is not counted).
+	// 0 means unset, and DefaultMaxRetries is used. To stop retrying, set
+	// DisableRetry.
 	MaxRetries uint
 
-	// DisableRetry はリトライを完全に無効にし、1 回だけ実行します。
-	// 成功のたびに副作用が生まれる呼び出しで、応答を取りこぼした際の再送が
-	// 二重実行になる場合に使います。
+	// DisableRetry disables retries entirely and runs exactly once.
+	// Use it for calls that cause a side effect on every success, where resending after a lost
+	// response would mean running twice.
 	DisableRetry bool
 
 	InitialDelay time.Duration
 	MaxDelay     time.Duration
 
-	// RequestTimeout は、生成呼び出し1回（リトライを含む）の上限時間です。
-	// 0 は無制限で、呼び出し側の context の期限にのみ従います。
-	// 動画生成の完了待ちには適用されません（veo 側の設定が受け持ちます）。
+	// RequestTimeout is the time limit for one generation call (including retries).
+	// 0 means unlimited, following only the deadline of the caller's context.
+	// It does not apply to waiting for video generation to complete (veo's settings handle that).
 	RequestTimeout time.Duration
 
-	// HTTPClient は genai SDK が使用する HTTP クライアントを差し替えます。
-	// nil の場合は SDK のデフォルトが使われます。
+	// HTTPClient replaces the HTTP client used by the genai SDK.
+	// If nil, the SDK's default is used.
 	//
-	// タイムアウトやプロキシを制御したい場合、あるいは SSRF 対策済みの
-	// クライアントを使いたい場合に指定します。
+	// Specify it to control timeouts or proxies, or to use a client hardened
+	// against SSRF.
 	//
 	//	cfg.HTTPClient = securenet.NewSafeHTTPClient(60 * time.Second)
 	//
-	// 認証は気にしなくて構いません。genai は HTTPClient を渡されると ADC の検出を
-	// スキップして認証ヘッダ無しで送ってしまいますが、toClientConfig が認証情報を
-	// 付け直します。渡したインスタンス自体は書き換えず、複製を使います。
+	// You need not worry about authentication. When given an HTTPClient, genai skips ADC detection
+	// and sends without an auth header, but toClientConfig re-attaches the credentials. The instance
+	// you passed is not modified; a copy is used.
 	HTTPClient *http.Client
 }
 
-// validate は設定内容が正しいかをチェックします。
+// validate checks that the configuration is correct.
 //
-// 未設定（両方空）と書きかけ（片方だけ）を分けているのは、前者が「設定を渡し忘れた」、
-// 後者が「片方の環境変数が空だった」という別々の間違いだからです。
+// Unset (both empty) and half-written (only one set) are kept apart because the former is the
+// mistake of "forgetting to pass the config" and the latter of "one environment variable was empty".
 //
-// APIKey と Vertex AI の設定が同時に来た場合はどちらを使うか決められないため、
-// 黙って一方を選ばずにエラーにします。
+// When both APIKey and Vertex AI settings arrive, there is no way to decide which to use, so
+// it returns an error rather than silently picking one.
 func (c Config) validate() error {
 	hasVertexField := c.ProjectID != "" || c.LocationID != ""
 
@@ -105,19 +105,19 @@ func (c Config) validate() error {
 	return nil
 }
 
-// usesAPIKey は、Gemini API バックエンドを使う設定かを返します。
-// validate 済みの Config では、APIKey が入っていることがそのまま条件になります。
+// usesAPIKey reports whether the configuration uses the Gemini API backend.
+// For a validated Config, having APIKey set is the condition itself.
 func (c Config) usesAPIKey() bool {
 	return c.APIKey != ""
 }
 
-// toClientConfig Config を genai.ClientConfig に変換します。
+// toClientConfig converts Config into a genai.ClientConfig.
 //
-// HTTPClient が指定されている場合は認証情報の付与も行います。genai は
-// ClientConfig.HTTPClient が非 nil だと ADC の検出そのものをスキップし、渡された
-// クライアントを認証ヘッダ無しで使うため、これが無いと全リクエストが 401
-// （CREDENTIALS_MISSING）になります。つまり素の &http.Client{Timeout: ...} を渡すと、
-// タイムアウトを設定したつもりで認証を捨てることになります。
+// When HTTPClient is specified, it also attaches credentials. When ClientConfig.HTTPClient is
+// non-nil, genai skips ADC detection altogether and uses the passed client without an auth
+// header, so without this every request would fail with 401 (CREDENTIALS_MISSING). In other
+// words, passing a plain &http.Client{Timeout: ...} would throw away authentication while
+// seeming to set a timeout.
 func (c Config) toClientConfig() (*genai.ClientConfig, error) {
 	cc := &genai.ClientConfig{}
 	cc.HTTPOptions.RetryOptions = c.retryOptions()
@@ -133,23 +133,23 @@ func (c Config) toClientConfig() (*genai.ClientConfig, error) {
 	if c.HTTPClient == nil {
 		return cc, nil
 	}
-	// UseDefaultCredentials は渡されたクライアントの Transport を書き換えるため、
-	// 呼び出し側が持っているインスタンスには触らないよう浅いコピーへ差し替える。
-	// Timeout などの設定は引き継がれる。
+	// UseDefaultCredentials rewrites the passed client's Transport, so swap in a shallow copy
+	// to avoid touching the instance the caller holds.
+	// Settings such as Timeout carry over.
 	clone := *c.HTTPClient
 	cc.HTTPClient = &clone
 
-	// Gemini API の認証は API キーのヘッダ付与で、Transport には依存しない。
+	// Gemini API authentication adds an API key header and does not depend on the Transport.
 	if c.usesAPIKey() {
 		return cc, nil
 	}
 	if err := cc.UseDefaultCredentials(); err != nil {
-		return nil, fmt.Errorf("gemini: 指定された HTTPClient への認証情報の付与に失敗しました: %w", err)
+		return nil, fmt.Errorf("gemini: failed to attach credentials to the provided HTTPClient: %w", err)
 	}
 	return cc, nil
 }
 
-// orDefault は v が正の値であればそれを、そうでなければ def を返します。
+// orDefault returns v if it is positive, otherwise def.
 func orDefault(v, def time.Duration) time.Duration {
 	if v > 0 {
 		return v
@@ -157,11 +157,11 @@ func orDefault(v, def time.Duration) time.Duration {
 	return def
 }
 
-// retryOptions は Config を genai SDK 内蔵リトライの設定へ変換します。
-// nil を返すと SDK はリトライせず 1 回だけ実行します。
+// retryOptions converts Config into the configuration for the genai SDK's built-in retries.
+// Returning nil makes the SDK run once without retrying.
 //
-// 対象のステータス（408/429/5xx）と通信エラーの判定は SDK に任せます。
-// 写し取ると、向こうが対象を増やしたときにこちらだけ古い一覧を持ち続けます。
+// Which statuses are retried (408/429/5xx) and how transport errors are judged is left to the SDK.
+// Copying the list would leave us holding a stale list when the SDK widens its criteria.
 func (c Config) retryOptions() *genai.HTTPRetryOptions {
 	if c.DisableRetry {
 		return nil
@@ -178,14 +178,14 @@ func (c Config) retryOptions() *genai.HTTPRetryOptions {
 		Attempts:     new(attemptsFrom(maxRetries)),
 		InitialDelay: new(initialDelay.Seconds()),
 		MaxDelay:     new(maxDelay.Seconds()),
-		// SDK の既定は U(0, 1秒) の加算で、数十秒の間隔ではほぼ効きません。並列の
-		// 生成が同じ 429 で弾かれたとき散らすのはジッタだけなので（callguard の
-		// 発射間隔はリトライに掛からない）、間隔に比例した幅を持たせます。
+		// The SDK's default adds U(0, 1s), which has almost no effect at intervals of tens of seconds.
+		// When parallel generations are refused with the same 429, only jitter spreads them out (callguard's
+		// firing interval does not apply to retries), so the jitter is given a width proportional to the delay.
 		Jitter: new(initialDelay.Seconds() / 2),
 	}
 }
 
-// backendName は、この設定で接続する経路の名前を返します。
+// backendName returns the name of the path this configuration connects through.
 func (c Config) backendName() string {
 	if c.APIKey != "" {
 		return "Gemini API"
@@ -193,12 +193,12 @@ func (c Config) backendName() string {
 	return "Vertex AI"
 }
 
-// interactionRetryConfig は、retryOptions と同じ方針を Interactions のリトライ設定へ写します。
+// interactionRetryConfig maps the same policy as retryOptions onto the Interactions retry configuration.
 //
-// genai の Interactions クライアントは HTTPRetryOptions を読まず、指定しなければ独自の既定
-// （4 回、500ms〜8 秒）で再送します。Config の MaxRetries・DisableRetry が片方の経路にしか
-// 効かない状態を避けるため、ここで揃えます。DisableRetry では nil ではなく "none" を返します。
-// nil は「既定を使う」の意味になるためです。
+// genai's Interactions client does not read HTTPRetryOptions and, unless told otherwise, resends with
+// its own defaults (4 times, 500ms to 8s). To avoid Config's MaxRetries and DisableRetry applying to
+// only one of the paths, they are aligned here. With DisableRetry it returns "none" rather than nil,
+// because nil means "use the defaults".
 func (c Config) interactionRetryConfig() *retry.Config {
 	if c.DisableRetry {
 		return &retry.Config{Strategy: "none"}
@@ -220,16 +220,16 @@ func (c Config) interactionRetryConfig() *retry.Config {
 	}
 }
 
-// noRetryHTTPOptions は、クライアントのリトライ設定をリクエスト単位で打ち消します。
-// ポーリングのように呼び出し側が間隔とタイムアウトを持っている経路で使います。
-// nil ではなく「1 回だけ」を渡すのは、genai がリクエスト側の RetryOptions を
-// 非 nil のときだけ上書き適用するためです。
+// noRetryHTTPOptions cancels out the client's retry settings for a single request.
+// It is used on paths where the caller owns the interval and timeout, such as polling.
+// It passes "exactly once" rather than nil because genai only applies a request's RetryOptions
+// as an override when they are non-nil.
 func noRetryHTTPOptions() *genai.HTTPOptions {
 	return &genai.HTTPOptions{RetryOptions: &genai.HTTPRetryOptions{Attempts: new(int32(1))}}
 }
 
-// attemptsFrom はリトライ回数を genai の総試行回数（初回を含む）へ変換します。
-// int32 に収まらない指定は飽和させます。
+// attemptsFrom converts the retry count into genai's total attempt count (including the first).
+// A value that does not fit in int32 saturates.
 func attemptsFrom(maxRetries uint) int32 {
 	if uint64(maxRetries) >= math.MaxInt32 {
 		return math.MaxInt32

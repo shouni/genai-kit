@@ -17,13 +17,13 @@ linters:
       exclude-functions:
         - (io.ReadCloser).Close
     staticcheck:
-      # SA4023 は staticcheck v0.8.0（golangci-lint v2.13.1 同梱）が veo の解析中に
-      # panic するため外している。nilness のファクト参照が範囲外アクセスで落ちるという
-      # 上流のバグで、このリポジトリのコードとは関係がない。
+      # SA4023 is disabled because staticcheck v0.8.0 (bundled with golangci-lint v2.13.1)
+      # panics while analysing veo. It is an upstream bug where nilness's fact lookup crashes
+      # on an out-of-range access, unrelated to this repository's code.
       #
-      # 落ちると goanalysis_metalinter ごと停止するので、失うのは SA4023 だけでなく
-      # staticcheck の全チェックになる。1 つ外して残りを動かすほうが得。
-      # 同梱の staticcheck が上がったら、この行を消して戻せるか確かめること。
+      # A crash stops goanalysis_metalinter as a whole, so what is lost is not just SA4023
+      # but every staticcheck check. Disabling one and keeping the rest running is the better deal.
+      # When the bundled staticcheck is upgraded, check whether this line can be removed.
       checks:
         - all
         - -SA4023

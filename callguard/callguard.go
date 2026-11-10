@@ -1,13 +1,13 @@
-// Package callguard は、外部 AI API の呼び出しに「発射間隔」「1 回あたりの上限時間」
-// 「同一内容の同時実行の重複排除」をまとめて掛けるためのプリミティブです。
+// Package callguard provides primitives that apply a "firing interval", a "per-call time limit"
+// and "deduplication of concurrent identical calls" to calls to external AI APIs.
 //
-// クォータはプロジェクト単位で、操作の種類ごとではありません。テキスト生成と
-// 画像生成で別々に絞っても意味がないため、ワークフロー全体で 1 つの Guard を共有し、
-// 重複排除の単位（Group）だけを呼び出しの種類ごとに分けるのが想定した使い方です。
+// Quota is per project, not per kind of operation. Throttling text generation and image
+// generation separately achieves nothing, so the intended use is to share one Guard across the
+// whole workflow and split only the deduplication unit (Group) per kind of call.
 //
-// 型付きのデコレータ（imagegen.Generator を包む、など）はここには置きません。
-// 何を包みたいかは利用側の都合で、ここに用意すると口の数だけ増え続けます。
-// デコレータは呼び出し側が持ち、その中で Do を呼んでください。
+// Typed decorators (wrapping imagegen.Generator, and so on) do not live here.
+// What to wrap is up to the caller, and providing them here would keep adding one per interface.
+// Callers own the decorators and call Do inside them.
 package callguard
 
 import (
@@ -27,64 +27,64 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// DefaultExecTimeout は、共有実行 1 回あたりの上限時間の既定値です。
+// DefaultExecTimeout is the default time limit for one shared execution.
 const DefaultExecTimeout = 5 * time.Minute
 
-// ErrPanicked は、共有実行の fn が panic したことを表します。
+// ErrPanicked indicates that the fn of a shared execution panicked.
 //
-// fn は singleflight が起こす別ゴルーチンで走るため、呼び出し側の recover は届きません。
-// 放置すると singleflight が panic を投げ直してプロセスごと落ち、同じプロセスに
-// 同居している他のジョブまで巻き添えになります。Do が回復してこのエラーに畳みます。
+// fn runs in a separate goroutine started by singleflight, so the caller's recover does not reach
+// it. Left alone, singleflight re-panics and the whole process goes down, taking other jobs sharing
+// the same process with it. Do recovers and folds it into this error.
 var ErrPanicked = errors.New("callguard: shared execution panicked")
 
-// Group は、同じキーの呼び出しをまとめる単位です。ゼロ値で使えます。
+// Group is the unit that collapses calls with the same key. Its zero value is ready to use.
 //
-// Guard に持たせていないのは、発射間隔（プロジェクト単位のクォータ）と
-// 重複排除の単位（呼び出しの内容）が別の粒度だからです。
+// It is not held by Guard because the firing interval (a per-project quota) and the deduplication
+// unit (the content of the call) have different granularity.
 type Group = singleflight.Group
 
-// Guard は、発射間隔と 1 回あたりの上限時間を保持します。
+// Guard holds the firing interval and the per-call time limit.
 //
-// nil は「制限なし・既定の上限時間」として扱えます。呼び出し側に分岐を
-// 持たせずそのまま渡せるようにするためで、テストが構造体リテラルで組む場合にも効きます。
+// nil can be treated as "no limits, default time limit". This lets callers pass it along without
+// branches, and also helps when tests build one with a struct literal.
 type Guard struct {
 	limiter *rate.Limiter
 	timeout time.Duration
 }
 
-// Option は Guard の任意設定です。
+// Option is an optional Guard setting.
 type Option func(*Guard)
 
-// WithRateInterval は AI 呼び出しの発射間隔の下限を設定します。
-// 0 以下（既定）なら発射間隔の制限を行いません。
+// WithRateInterval sets the minimum firing interval between AI calls.
+// At 0 or below (the default), the firing interval is not limited.
 //
-// スループットの上限はここで決まります。並列度をいくつに上げても 1/interval が
-// 頭打ちで、発射間隔と並列度の両方を大きくする設定は矛盾しています。
+// This decides the throughput ceiling. However high the parallelism goes, 1/interval is the cap,
+// so a setting that raises both the firing interval and the parallelism is self-contradictory.
 func WithRateInterval(interval time.Duration) Option {
 	return func(g *Guard) {
 		if interval <= 0 {
 			g.limiter = nil
 			return
 		}
-		// バースト 1 は「interval ごとに 1 回」そのものです。まとめて撃てる枠を
-		// 設けると、クォータ保護としての発射間隔の意味が消えます。
+		// A burst of 1 is exactly "once per interval". Allowing a slot that fires several at once
+		// would remove the meaning of the firing interval as quota protection.
 		g.limiter = rate.NewLimiter(rate.Every(interval), 1)
 	}
 }
 
-// WithExecTimeout は共有実行 1 回あたりの上限時間を設定します。
-// 0 以下（既定）なら DefaultExecTimeout を使います。
+// WithExecTimeout sets the time limit for one shared execution.
+// At 0 or below (the default), DefaultExecTimeout is used.
 //
-// 「無制限」は提供しません。共有実行は呼び出し元の context から切り離されるため、
-// これが唯一の打ち切り手段です。無制限にすると、応答の返らない 1 回がゴルーチンを
-// 抱えたまま残り、同じキーの後続を永久に待たせます。
+// "Unlimited" is not offered. A shared execution is detached from the caller's context, so this
+// is the only way to cut it off. Without a limit, a single call that never responds would remain
+// holding its goroutine and keep later calls with the same key waiting forever.
 func WithExecTimeout(d time.Duration) Option {
 	return func(g *Guard) {
 		g.timeout = d
 	}
 }
 
-// New は Guard を組み立てます。
+// New builds a Guard.
 func New(opts ...Option) *Guard {
 	g := &Guard{}
 	for _, opt := range opts {
@@ -93,7 +93,7 @@ func New(opts ...Option) *Guard {
 	return g
 }
 
-// execTimeout は適用する上限時間を返します。nil レシーバでも安全です。
+// execTimeout returns the time limit to apply. Safe on a nil receiver.
 func (g *Guard) execTimeout() time.Duration {
 	if g == nil || g.timeout <= 0 {
 		return DefaultExecTimeout
@@ -101,7 +101,7 @@ func (g *Guard) execTimeout() time.Duration {
 	return g.timeout
 }
 
-// wait は次に呼び出してよい時刻まで待ちます。nil レシーバでも安全です。
+// wait waits until the next call is allowed. Safe on a nil receiver.
 func (g *Guard) wait(ctx context.Context) error {
 	if g == nil || g.limiter == nil {
 		return nil
@@ -109,26 +109,26 @@ func (g *Guard) wait(ctx context.Context) error {
 	return g.limiter.Wait(ctx)
 }
 
-// Do は同じ key の同時実行を 1 回にまとめ、呼び出し元のキャンセルも尊重します。
-// guard が nil の場合は「発射間隔の制限なし・既定の上限時間」で実行します。
+// Do collapses concurrent executions with the same key into one, while respecting the caller's cancellation.
+// If guard is nil, it runs with "no firing interval limit, default time limit".
 //
-// 実行用 context を呼び出し元から切り離すのは、共有実行のクロージャの中です
-// （context.WithoutCancel）。外で切り離すと、リーダー（最初の呼び出し元）が
-// キャンセルして早期リターンした際に defer cancel() が共有実行を打ち切り、
-// 相乗りしている他の呼び出し元が巻き添えになります。
+// The execution context is detached from the caller inside the shared execution's closure
+// (context.WithoutCancel). Detaching it outside would let the leader's (the first caller's)
+// defer cancel() cut off the shared execution when the leader cancels and returns early,
+// taking the other callers sharing it down with it.
 //
-// 発射間隔の待機は上限時間の外側で行います。待たされた時間を 1 回あたりの
-// 上限時間に数えると、混雑しているだけでタイムアウトしてしまうためです。
+// Waiting for the firing interval happens outside the time limit. Counting the time spent
+// waiting toward the per-call time limit would make calls time out merely from congestion.
 //
-// すでに終わっている ctx では fn を実行しません。実行は呼び出し元から切り離される
-// ため、ここで確かめないと、結果を受け取る者のいない課金呼び出しが最後まで走ります
-// （ジョブの打ち切り後に、一括処理の残りが 1 件ずつ発射され続ける形になります）。
-// 確かめるのは合流の前だけで、合流したあとの切り離しは変わりません。
+// fn is not run with a ctx that is already done. Execution is detached from the caller, so
+// without this check a billed call with nobody to receive the result would run to the end
+// (after a job is cut off, the rest of a batch would keep firing one by one).
+// The check happens only before joining; detachment after joining is unchanged.
 //
-// fn の panic は回復して ErrPanicked に畳み、相乗りした全員へ同じエラーを返します。
+// A panic in fn is recovered and folded into ErrPanicked, and the same error is returned to everyone sharing the call.
 //
-// 戻り値は相乗りした全員で共有されます。呼び出し側が書き換える可能性があるものは
-// 複製してから返してください。
+// The return value is shared by everyone who joined the call. Copy anything the caller might
+// modify before returning it.
 func Do[T any](
 	ctx context.Context,
 	group *Group,
@@ -177,8 +177,8 @@ func Do[T any](
 		}
 
 		value, ok := result.Val.(T)
-		// fn の静的な型付けにより result.Val は常に T なので、この分岐は実際には
-		// 到達しません。将来のリファクタリングに対する防御として残しています。
+		// Given fn's static typing, result.Val is always T, so this branch is never actually
+		// reached. It is kept as a defence against future refactoring.
 		if !ok {
 			var zero T
 			return zero, fmt.Errorf("callguard: singleflight result type mismatch for key %s", key)
@@ -187,11 +187,11 @@ func Do[T any](
 	}
 }
 
-// WriteHashPart は長さプレフィックス付きでハッシュへ部品を書き込みます。
+// WriteHashPart writes a part to the hash with a length prefix.
 //
-// 長さを先に書くのは "ab"+"c" と "a"+"bc" のような連結の衝突を防ぐためです。
-// キーを組み立てる関数はすべてこの 1 つの枠組みを共有してください。画像の
-// バイト列のように文字列にすると複製が発生する部品は、Key ではなくこちらを直接使います。
+// The length is written first to prevent concatenation collisions such as "ab"+"c" versus "a"+"bc".
+// Every function building keys should share this one framing. Parts that would be copied if
+// turned into strings, such as image bytes, use this directly instead of Key.
 func WriteHashPart(h hash.Hash, part []byte) {
 	var lengthBuf [8]byte
 	binary.LittleEndian.PutUint64(lengthBuf[:], uint64(len(part)))
@@ -199,11 +199,11 @@ func WriteHashPart(h hash.Hash, part []byte) {
 	h.Write(part)
 }
 
-// Key は namespace と可変長の部品から衝突しにくい singleflight 用キーを作ります。
+// Key builds a collision-resistant singleflight key from a namespace and variadic parts.
 //
-// 出力を変えるものは漏れなく部品に含めてください。特に seed は、プロンプトからは
-// 導けないのに結果を変えるため、含め忘れると seed 違いの同時呼び出しが 1 回の生成結果を
-// 共有します（SeedKey を使ってください）。
+// Include every part that changes the output. The seed in particular cannot be derived from the
+// prompt yet changes the result, so leaving it out makes concurrent calls with different seeds
+// share the result of one generation (use SeedKey).
 func Key(namespace string, parts ...string) string {
 	hasher := sha256.New()
 	for _, part := range parts {
@@ -212,7 +212,7 @@ func Key(namespace string, parts ...string) string {
 	return namespace + ":" + hex.EncodeToString(hasher.Sum(nil))
 }
 
-// SeedKey は nil と実値を区別できる seed 用のキー部品を作ります。
+// SeedKey builds a seed key part that distinguishes nil from an actual value.
 func SeedKey(seed *int64) string {
 	if seed == nil {
 		return "seed:nil"

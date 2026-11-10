@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-// Option は Client の設定を適用する関数型です。
-// 不正な値（ゼロ以下）は「指定なし」として無視し、既定値のままにします。
+// Option is a function that applies a Client setting.
+// Invalid values (zero or below) are ignored as "not specified" and the default is kept.
 type Option func(*Client)
 
-// WithPollInterval は、生成完了を確認する間隔を設定します。
+// WithPollInterval sets the interval at which generation completion is checked.
 func WithPollInterval(d time.Duration) Option {
 	return func(c *Client) {
 		if d > 0 {
@@ -18,8 +18,8 @@ func WithPollInterval(d time.Duration) Option {
 	}
 }
 
-// WithPollTimeout は、生成完了を待つ上限時間を設定します。
-// 呼び出し側の context にこれより短い期限がある場合は、そちらが先に効きます。
+// WithPollTimeout sets the maximum time to wait for generation to complete.
+// If the caller's context has a shorter deadline, that one takes effect first.
 func WithPollTimeout(d time.Duration) Option {
 	return func(c *Client) {
 		if d > 0 {
@@ -28,9 +28,9 @@ func WithPollTimeout(d time.Duration) Option {
 	}
 }
 
-// WithMaxPollErrors は、生成状況の確認が連続して失敗するのを何回まで許容するかを
-// 設定します。この回数に達した時点で ErrPollFailed として打ち切ります。
-// 途中で1回でも成功すれば、カウントはゼロに戻ります。
+// WithMaxPollErrors sets how many consecutive failures of the generation status check
+// are tolerated. On reaching this count, waiting is abandoned with ErrPollFailed.
+// A single success along the way resets the count to zero.
 func WithMaxPollErrors(n int) Option {
 	return func(c *Client) {
 		if n > 0 {
@@ -39,9 +39,9 @@ func WithMaxPollErrors(n int) Option {
 	}
 }
 
-// WithLogger は、このクライアントが出すログの出力先を設定します。
-// 未指定（または nil）の場合は slog.Default() を使います。ジョブ ID などの属性を
-// 付けたロガーを渡すと、ポーリングの警告ログにもその属性が乗ります。
+// WithLogger sets where this client's logs are written.
+// If unspecified (or nil), slog.Default() is used. Passing a logger with attributes such
+// as a job ID attaches those attributes to the polling warning logs too.
 func WithLogger(logger *slog.Logger) Option {
 	return func(c *Client) {
 		if logger != nil {

@@ -2,9 +2,9 @@ package lyria
 
 import "github.com/shouni/genai-kit/gemini"
 
-// lyricsDraftSchema は LyricsDraft の構造化出力スキーマです。
-// ResponseMIMEType "application/json" と併用することで、モデル出力が
-// このスキーマに文法レベルで制約されます。
+// lyricsDraftSchema is the structured-output schema for LyricsDraft.
+// Used together with ResponseMIMEType "application/json", it constrains the model
+// output to this schema at the grammar level.
 func lyricsDraftSchema() *gemini.Schema {
 	return &gemini.Schema{
 		Type: gemini.TypeObject,
@@ -21,9 +21,9 @@ func lyricsDraftSchema() *gemini.Schema {
 	}
 }
 
-// musicRecipeSchema は MusicRecipe の構造化出力スキーマです。
-// Lyrics と AIModels はモデルに生成させず、呼び出し側のコードが付与するため
-// 意図的にスキーマへ含めていません。
+// musicRecipeSchema is the structured-output schema for MusicRecipe.
+// Lyrics and AIModels are deliberately left out of the schema: the model does not
+// generate them, the caller's code fills them in.
 func musicRecipeSchema() *gemini.Schema {
 	return &gemini.Schema{
 		Type: gemini.TypeObject,

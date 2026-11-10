@@ -14,14 +14,14 @@ import (
 	"github.com/shouni/genai-kit/gemini"
 )
 
-// fakeGenerator は gemini.VideoGenerator のテストダブルです。genai SDK も GCP 認証も
-// 使わずにポーリングの挙動を検証できることが、DI で境界を切っている利点そのものです。
+// fakeGenerator is a test double for gemini.VideoGenerator. Being able to test the polling
+// behaviour without the genai SDK or GCP credentials is exactly the benefit of cutting the boundary with DI.
 type fakeGenerator struct {
 	startOp  *gemini.VideoOperation
 	startErr error
 
-	// polls は PollVideo が返す応答を順に消費します。最後の要素に到達したら
-	// 以降はそれを返し続けます。
+	// polls consumes the responses returned by PollVideo in order. Once the last element is reached,
+	// it keeps returning that one.
 	polls     []pollResponse
 	pollCalls int
 	lastName  string
@@ -49,9 +49,9 @@ func (f *fakeGenerator) PollVideo(_ context.Context, operationName string) (*gem
 	return f.polls[i].op, f.polls[i].err
 }
 
-// newTestClient は、テストが待たされないよう短いポーリング間隔で Client を作ります。
-// 仮想時計を使うテストでも実時間を消費しないため、値そのものに意味はありません。
-// ログは捨てます（ポーリングの警告が t の出力に混ざると読みにくいため）。
+// newTestClient builds a Client with a short polling interval so tests are not kept waiting.
+// Tests using the virtual clock consume no real time either, so the values themselves do not matter.
+// Logs are discarded (polling warnings mixed into t's output are hard to read).
 func newTestClient(t *testing.T, generator gemini.VideoGenerator, opts ...Option) *Client {
 	t.Helper()
 
@@ -85,8 +85,8 @@ func TestNewRequiresGenerator(t *testing.T) {
 	}
 }
 
-// TestGeneratePollsUntilDone は、投函後に完了するまでポーリングし、完了した時点の
-// 結果を返すことを検証します。
+// TestGeneratePollsUntilDone checks that after submitting, it polls until completion and returns
+// the result at the point it completed.
 func TestGeneratePollsUntilDone(t *testing.T) {
 	generator := &fakeGenerator{
 		startOp: running("operations/abc"),
@@ -107,7 +107,7 @@ func TestGeneratePollsUntilDone(t *testing.T) {
 		t.Errorf("OperationName = %q", got.OperationName)
 	}
 	if generator.lastName != "operations/abc" {
-		t.Errorf("polled name = %q, want 投函したオペレーション名", generator.lastName)
+		t.Errorf("polled name = %q, want the submitted operation name", generator.lastName)
 	}
 	video, ok := got.First()
 	if !ok || video.URI != "gs://bucket/out.mp4" {
@@ -118,8 +118,8 @@ func TestGeneratePollsUntilDone(t *testing.T) {
 	}
 }
 
-// TestGenerateReturnsImmediatelyWhenAlreadyDone は、投函の応答が既に完了していた場合に
-// 1 度もポーリングせず結果を返すことを検証します。
+// TestGenerateReturnsImmediatelyWhenAlreadyDone checks that when the submission response is
+// already complete, the result is returned without polling even once.
 func TestGenerateReturnsImmediatelyWhenAlreadyDone(t *testing.T) {
 	generator := &fakeGenerator{startOp: finished("operations/done", "gs://bucket/out.mp4")}
 	client := newTestClient(t, generator)
@@ -132,8 +132,8 @@ func TestGenerateReturnsImmediatelyWhenAlreadyDone(t *testing.T) {
 	}
 }
 
-// TestGeneratePropagatesStartError は、投函に失敗したらポーリングへ進まないことを
-// 検証します。リトライは gemini 側で既に尽きているため、ここでは再試行しません。
+// TestGeneratePropagatesStartError checks that a failed submission does not proceed to polling.
+// Retries have already been exhausted on the gemini side, so it does not retry here.
 func TestGeneratePropagatesStartError(t *testing.T) {
 	sentinel := errors.New("quota exceeded")
 	generator := &fakeGenerator{startErr: sentinel}
@@ -141,15 +141,15 @@ func TestGeneratePropagatesStartError(t *testing.T) {
 
 	_, err := client.Generate(context.Background(), "veo-3.1-generate-001", Request{Prompt: "a cat"})
 	if !errors.Is(err, sentinel) {
-		t.Fatalf("Generate() error = %v, want 投函時のエラー", err)
+		t.Fatalf("Generate() error = %v, want the submission error", err)
 	}
 	if generator.pollCalls != 0 {
 		t.Errorf("poll calls = %d, want 0", generator.pollCalls)
 	}
 }
 
-// TestGenerateRejectsEmptyStartResponse は、投函の応答が nil だった場合に
-// 空レスポンスとして扱うことを検証します。
+// TestGenerateRejectsEmptyStartResponse checks that a nil submission response is treated as
+// an empty response.
 func TestGenerateRejectsEmptyStartResponse(t *testing.T) {
 	client := newTestClient(t, &fakeGenerator{startOp: nil})
 
@@ -159,8 +159,8 @@ func TestGenerateRejectsEmptyStartResponse(t *testing.T) {
 	}
 }
 
-// TestWaitPollsImmediately は、待ちの再開で 1 interval 分の死に時間を作らないことを
-// 検証します。別実行から再開する経路では対象が既に完了していることが多い前提です。
+// TestWaitPollsImmediately checks that resuming a wait does not create one interval of dead time.
+// It assumes that on the path resuming from a different execution, the target has often already completed.
 func TestWaitPollsImmediately(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		generator := &fakeGenerator{polls: []pollResponse{{op: finished("operations/abc", "gs://bucket/out.mp4")}}}
@@ -171,13 +171,13 @@ func TestWaitPollsImmediately(t *testing.T) {
 			t.Fatalf("Wait() error = %v", err)
 		}
 		if elapsed := time.Since(start); elapsed != 0 {
-			t.Errorf("elapsed = %v, want 0（間隔を待たずに 1 回目を撃つ）", elapsed)
+			t.Errorf("elapsed = %v, want 0 (fire the first query without waiting for the interval)", elapsed)
 		}
 	})
 }
 
-// TestWaitStopsAfterConsecutivePollErrors は、確認が続けて失敗したらタイムアウトまで
-// 粘らずに打ち切ることを検証します。原因は Unwrap で辿れます。
+// TestWaitStopsAfterConsecutivePollErrors checks that repeated check failures give up without
+// holding on until the timeout. The cause can be reached through Unwrap.
 func TestWaitStopsAfterConsecutivePollErrors(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sentinel := errors.New("permission denied")
@@ -189,16 +189,16 @@ func TestWaitStopsAfterConsecutivePollErrors(t *testing.T) {
 			t.Fatalf("Wait() error = %v, want ErrPollFailed", err)
 		}
 		if !errors.Is(err, sentinel) {
-			t.Errorf("Wait() error = %v, want 原因が辿れること", err)
+			t.Errorf("Wait() error = %v, want the cause to be reachable", err)
 		}
 		if generator.pollCalls != 3 {
-			t.Errorf("poll calls = %d, want 許容回数の 3 で打ち切ること", generator.pollCalls)
+			t.Errorf("poll calls = %d, want it to give up at the tolerated count of 3", generator.pollCalls)
 		}
 	})
 }
 
-// TestWaitTimesOut は、生成が終わらないまま上限時間に達した場合に打ち切ることを
-// 検証します。時間切れは一時的な失敗とは別物です。
+// TestWaitTimesOut checks that the wait gives up when the time limit is reached before generation
+// finishes. A timeout is different from a transient failure.
 func TestWaitTimesOut(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		generator := &fakeGenerator{polls: []pollResponse{{op: running("operations/abc")}}}
@@ -206,16 +206,16 @@ func TestWaitTimesOut(t *testing.T) {
 
 		_, err := client.Wait(context.Background(), "operations/abc")
 		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("Wait() error = %v, want 期限切れ", err)
+			t.Fatalf("Wait() error = %v, want a deadline exceeded", err)
 		}
 		if errors.Is(err, ErrPollFailed) {
-			t.Error("時間切れはポーリングの失敗ではないため ErrPollFailed に分類すべきではありません")
+			t.Error("a timeout is not a polling failure and should not be classified as ErrPollFailed")
 		}
 	})
 }
 
-// TestWaitPropagatesGenerationFailure は、生成そのものが失敗として完了した場合に、
-// 通信エラーではなく生成失敗として返すことを検証します。
+// TestWaitPropagatesGenerationFailure checks that when generation itself completes as a failure,
+// it is returned as a generation failure rather than a transport error.
 func TestWaitPropagatesGenerationFailure(t *testing.T) {
 	failed := &gemini.VideoOperation{
 		Name:    "operations/abc",
@@ -230,8 +230,8 @@ func TestWaitPropagatesGenerationFailure(t *testing.T) {
 	}
 }
 
-// TestWaitReportsSafetyFiltering は、成功で完了したのに動画が無い場合に、除外の
-// 理由まで含めて報告することを検証します。プロンプトを直すのに必要な情報です。
+// TestWaitReportsSafetyFiltering checks that when the operation completed successfully but there is
+// no video, the report includes the reason for the exclusion. That is the information needed to fix the prompt.
 func TestWaitReportsSafetyFiltering(t *testing.T) {
 	filtered := &gemini.VideoOperation{
 		Name:            "operations/abc",
@@ -246,12 +246,12 @@ func TestWaitReportsSafetyFiltering(t *testing.T) {
 		t.Fatalf("Wait() error = %v, want ErrNoVideoGenerated", err)
 	}
 	if !strings.Contains(err.Error(), "violence") {
-		t.Errorf("error = %q, want 除外理由を含むこと", err)
+		t.Errorf("error = %q, want it to include the exclusion reason", err)
 	}
 }
 
-// TestWaitReportsMissingVideoWithoutReason は、除外理由が無いまま動画が返らなかった
-// 場合でもオペレーション名を残すことを検証します。
+// TestWaitReportsMissingVideoWithoutReason checks that the operation name is kept even when no
+// video came back and there is no exclusion reason.
 func TestWaitReportsMissingVideoWithoutReason(t *testing.T) {
 	empty := &gemini.VideoOperation{Name: "operations/abc", Done: true}
 	client := newTestClient(t, &fakeGenerator{polls: []pollResponse{{op: empty}}})
@@ -261,7 +261,7 @@ func TestWaitReportsMissingVideoWithoutReason(t *testing.T) {
 		t.Fatalf("Wait() error = %v, want ErrNoVideoGenerated", err)
 	}
 	if !strings.Contains(err.Error(), "operations/abc") {
-		t.Errorf("error = %q, want オペレーション名を含むこと", err)
+		t.Errorf("error = %q, want it to include the operation name", err)
 	}
 }
 
@@ -269,13 +269,13 @@ func TestWaitRequiresOperationName(t *testing.T) {
 	client := newTestClient(t, &fakeGenerator{})
 
 	if _, err := client.Wait(context.Background(), "  "); !errors.Is(err, ErrMissingOperationName) {
-		t.Fatalf("Wait(空白) error = %v, want ErrMissingOperationName", err)
+		t.Fatalf("Wait(whitespace) error = %v, want ErrMissingOperationName", err)
 	}
 }
 
-// TestSubmitReturnsOperationName は、投函だけを単独で使えることを検証します。
-// これが無いと、待ちを別実行に回す呼び出し側が投函だけ veo を通らず
-// gemini.StartVideo を直接呼ぶことになり、投函と待ちで依存先が割れます。
+// TestSubmitReturnsOperationName checks that submitting can be used on its own.
+// Without it, a caller that moves the wait to a different execution would submit by calling
+// gemini.StartVideo directly instead of through veo, splitting the dependency between submitting and waiting.
 func TestSubmitReturnsOperationName(t *testing.T) {
 	fake := &fakeGenerator{startOp: running("operations/submitted")}
 	client := newTestClient(t, fake)
@@ -285,15 +285,15 @@ func TestSubmitReturnsOperationName(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	if name != "operations/submitted" {
-		t.Errorf("name = %q, want オペレーション名", name)
+		t.Errorf("name = %q, want the operation name", name)
 	}
 	if fake.pollCalls != 0 {
-		t.Errorf("PollVideo calls = %d, want 0（Submit は待たない）", fake.pollCalls)
+		t.Errorf("PollVideo calls = %d, want 0 (Submit does not wait)", fake.pollCalls)
 	}
 }
 
-// TestSubmitRequiresOperationName は、名前の無いオペレーションを投函時に弾くことを
-// 検証します。Wait でポーリングできない名前を返すよりも早く失敗させます。
+// TestSubmitRequiresOperationName checks that an operation without a name is refused at submission.
+// It fails earlier than returning a name that Wait cannot poll.
 func TestSubmitRequiresOperationName(t *testing.T) {
 	client := newTestClient(t, &fakeGenerator{startOp: &gemini.VideoOperation{}})
 
@@ -309,20 +309,20 @@ func TestSubmitPropagatesStartError(t *testing.T) {
 
 	_, err := client.Submit(context.Background(), "veo-test", Request{Prompt: "a cat"})
 	if !errors.Is(err, sentinel) {
-		t.Errorf("Submit() error = %v, want 投函時のエラー", err)
+		t.Errorf("Submit() error = %v, want the submission error", err)
 	}
 }
 
-// TestResultFirst は、動画が無いときに添字アクセスで落ちないことを検証します。
+// TestResultFirst checks that it does not crash on an index access when there is no video.
 func TestResultFirst(t *testing.T) {
 	tests := []struct {
 		name   string
 		result *Result
 		wantOK bool
 	}{
-		{"nil レシーバ", nil, false},
-		{"動画なし", &Result{}, false},
-		{"動画あり", &Result{Videos: []gemini.Attachment{{URI: "gs://bucket/out.mp4"}}}, true},
+		{"nil receiver", nil, false},
+		{"no video", &Result{}, false},
+		{"with video", &Result{Videos: []gemini.Attachment{{URI: "gs://bucket/out.mp4"}}}, true},
 	}
 
 	for _, tt := range tests {
@@ -332,7 +332,7 @@ func TestResultFirst(t *testing.T) {
 				t.Fatalf("First() ok = %v, want %v", ok, tt.wantOK)
 			}
 			if !ok && (got.URI != "" || got.MIMEType != "" || len(got.Data) != 0) {
-				t.Errorf("First() = %+v, want ゼロ値", got)
+				t.Errorf("First() = %+v, want the zero value", got)
 			}
 		})
 	}

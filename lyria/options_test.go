@@ -12,7 +12,7 @@ import (
 func TestApplyOptions(t *testing.T) {
 	t.Parallel()
 
-	t.Run("指定した値が反映されること", func(t *testing.T) {
+	t.Run("applies the specified values", func(t *testing.T) {
 		audio := &fakeGenerator{}
 
 		got := applyOptions(
@@ -32,9 +32,9 @@ func TestApplyOptions(t *testing.T) {
 		assert.Equal(t, 90*time.Second, got.execTimeout)
 	})
 
-	// execTimeout の 0 は「未設定」で、callguard 側の既定値へ倒れます。
-	// ここで既定値を埋めてしまうと、callguard の既定と二重管理になります。
-	t.Run("未指定はゼロ値のままにすること", func(t *testing.T) {
+	// An execTimeout of 0 means "unset" and falls through to callguard's default.
+	// Filling in a default here would mean managing it in two places alongside callguard's.
+	t.Run("leaves unspecified values at zero", func(t *testing.T) {
 		got := applyOptions()
 
 		assert.Zero(t, got.execTimeout)
@@ -43,15 +43,15 @@ func TestApplyOptions(t *testing.T) {
 		assert.Nil(t, got.audioGenerator)
 	})
 
-	t.Run("nil の Option を読み飛ばすこと", func(t *testing.T) {
+	t.Run("skips a nil Option", func(t *testing.T) {
 		got := applyOptions(nil, WithGeminiModel("g"), nil)
 
 		assert.Equal(t, "g", got.geminiModel)
 	})
 }
 
-// TestJSONOptions は、構造化出力の設定が揃うことを検証します。
-// スキーマが落ちるとモデル出力が文法レベルで制約されなくなります。
+// TestJSONOptions checks that the structured-output settings are all present.
+// If the schema is dropped, the model output is no longer constrained at the grammar level.
 func TestJSONOptions(t *testing.T) {
 	t.Parallel()
 
@@ -67,19 +67,19 @@ func TestJSONOptions(t *testing.T) {
 	}
 }
 
-// TestAudioOptions は、Lyria 向けのオプションを検証します。
-// Lyria はレスポンス MIME type の指定なしで音声を返すため、指定しません。
+// TestAudioOptions checks the options for Lyria.
+// Lyria returns audio without a response MIME type, so none is specified.
 func TestAudioOptions(t *testing.T) {
 	t.Parallel()
 
-	t.Run("seed が nil なら渡さないこと", func(t *testing.T) {
+	t.Run("does not pass seed when it is nil", func(t *testing.T) {
 		got := audioOptions(nil)
 
 		assert.Nil(t, got.Seed)
 		assert.Empty(t, got.ResponseMIMEType)
 	})
 
-	t.Run("seed を保つこと", func(t *testing.T) {
+	t.Run("keeps seed", func(t *testing.T) {
 		seed := int64(42)
 
 		got := audioOptions(&seed)
@@ -90,9 +90,9 @@ func TestAudioOptions(t *testing.T) {
 	})
 }
 
-// TestBaseOptionsUsesBlockNone は、共通の安全設定が BLOCK_NONE で揃うことを
-// 検証します。生成結果の再現性を優先した選択で、入出力の制御は呼び出し側または
-// 後段処理が受け持つ前提です。
+// TestBaseOptionsUsesBlockNone checks that the shared safety settings are uniformly
+// BLOCK_NONE. The choice favours reproducible generation, on the premise that the caller
+// or a later stage takes care of controlling input and output.
 func TestBaseOptionsUsesBlockNone(t *testing.T) {
 	t.Parallel()
 

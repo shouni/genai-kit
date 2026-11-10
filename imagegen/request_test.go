@@ -10,11 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestBuildFinalPromptRendersNegativePrompt は、ネガティブプロンプトの描画を
-// 検証します。
+// TestBuildFinalPromptRendersNegativePrompt checks how the negative prompt is rendered.
 //
-// これは互換性の契約です。ネガティブプロンプトは API のフィールドではなく、
-// 下流のプロンプト実装がこの区切りの見た目そのものに依存しています。
+// This is a compatibility contract. The negative prompt is not an API field, and downstream
+// prompt implementations depend on the exact appearance of this separator.
 func TestBuildFinalPromptRendersNegativePrompt(t *testing.T) {
 	t.Parallel()
 
@@ -24,12 +23,12 @@ func TestBuildFinalPromptRendersNegativePrompt(t *testing.T) {
 		negative string
 		want     string
 	}{
-		{"どちらも空", "", "", ""},
-		{"本文のみ", "a cat", "", "a cat"},
-		{"ネガティブのみ", "", "blurry", "\n\n[Negative Prompt]\nblurry"},
-		{"両方", "a cat", "blurry", "a cat\n\n[Negative Prompt]\nblurry"},
-		{"前後の空白は落とす", "  a cat  ", "  blurry  ", "a cat\n\n[Negative Prompt]\nblurry"},
-		{"空白だけは空扱い", "   ", "   ", ""},
+		{"both empty", "", "", ""},
+		{"body only", "a cat", "", "a cat"},
+		{"negative only", "", "blurry", "\n\n[Negative Prompt]\nblurry"},
+		{"both", "a cat", "blurry", "a cat\n\n[Negative Prompt]\nblurry"},
+		{"trims surrounding whitespace", "  a cat  ", "  blurry  ", "a cat\n\n[Negative Prompt]\nblurry"},
+		{"whitespace only counts as empty", "   ", "   ", ""},
 	}
 
 	for _, tt := range tests {
@@ -39,33 +38,33 @@ func TestBuildFinalPromptRendersNegativePrompt(t *testing.T) {
 	}
 }
 
-// TestNegativePromptSeparatorIsStable は、区切りの見た目そのものを固定します。
-// 変えると下流のプロンプト実装のマッチが外れます。
+// TestNegativePromptSeparatorIsStable pins the exact appearance of the separator.
+// Changing it breaks matching in downstream prompt implementations.
 func TestNegativePromptSeparatorIsStable(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, "\n\n[Negative Prompt]\n", negativePromptSeparator)
 }
 
-// TestApplyDefaultsFillsOnlyUnsetFields は、明示された安全設定と人物生成を
-// 上書きしないことを検証します。無条件に上書きすると、呼び出し側が安全フィルタを
-// 厳しくする手段が無くなります。
+// TestApplyDefaultsFillsOnlyUnsetFields checks that explicitly set safety settings and person
+// generation are not overwritten. Overwriting unconditionally would leave callers no way to make
+// the safety filters stricter.
 func TestApplyDefaultsFillsOnlyUnsetFields(t *testing.T) {
 	t.Parallel()
 
-	t.Run("未設定なら既定値を補うこと", func(t *testing.T) {
+	t.Run("fills in defaults when unset", func(t *testing.T) {
 		got := applyDefaults(gemini.GenerateOptions{})
 
 		require.NotEmpty(t, got.SafetySettings)
 		for _, setting := range got.SafetySettings {
-			// Vertex AI は OFF を受け付けないため BLOCK_NONE を使う。
+			// Vertex AI does not accept OFF, so BLOCK_NONE is used.
 			assert.Equal(t, gemini.SafetyBlockNone, setting.Threshold)
 		}
-		// キャラクター生成が主用途のため、未指定時は人物生成を許可する。
+		// Character generation is the main use, so person generation is allowed when unspecified.
 		assert.Equal(t, gemini.PersonGenerationAllowAll, got.PersonGeneration)
 	})
 
-	t.Run("明示された値は尊重すること", func(t *testing.T) {
+	t.Run("respects explicitly set values", func(t *testing.T) {
 		strict := gemini.NewSafetySettings(gemini.SafetyBlockLowAndAbove)
 
 		got := applyDefaults(gemini.GenerateOptions{
@@ -78,8 +77,8 @@ func TestApplyDefaultsFillsOnlyUnsetFields(t *testing.T) {
 	})
 }
 
-// TestPrepareCombinesPromptAndDefaults は、検証・プロンプト結合・既定値の補完が
-// 1 回で済むことを検証します。
+// TestPrepareCombinesPromptAndDefaults checks that validation, prompt joining and filling in
+// defaults are done in one pass.
 func TestPrepareCombinesPromptAndDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -95,11 +94,11 @@ func TestPrepareCombinesPromptAndDefaults(t *testing.T) {
 	assert.Equal(t, "imagen-test", got.model)
 	assert.Equal(t, "a cat"+negativePromptSeparator+"blurry", got.prompt)
 	assert.NotEmpty(t, got.opts.SafetySettings)
-	assert.Nil(t, got.opts.Seed, "自動採番を切っているのでシードは付かない")
+	assert.Nil(t, got.opts.Seed, "automatic seeding is off, so no seed is attached")
 }
 
-// TestPrepareAcceptsNegativePromptOnly は、ネガティブプロンプトだけでも送信可能な
-// ことを検証します。結合後の文字列が空でなければ有効な指示だからです。
+// TestPrepareAcceptsNegativePromptOnly checks that a negative prompt alone can be sent.
+// If the joined string is not empty, it is a valid instruction.
 func TestPrepareAcceptsNegativePromptOnly(t *testing.T) {
 	t.Parallel()
 
@@ -111,11 +110,11 @@ func TestPrepareAcceptsNegativePromptOnly(t *testing.T) {
 	assert.Contains(t, got.prompt, "blurry")
 }
 
-// TestReferenceAttachmentsKeepsOrderAndDropsEmpty は、参照画像の並び順が保たれ、
-// 空文字列の要素が黙って外れることを検証します。
+// TestReferenceAttachmentsKeepsOrderAndDropsEmpty checks that the order of reference images
+// is kept and that empty-string elements are silently dropped.
 //
-// 空要素を落とすのは、「このキャラクターには参照画像が無い」を呼び出し側が
-// 要素の欠落として表現できるようにするためです。
+// Empty elements are dropped so that callers can express "this character has no reference
+// image" as a missing element.
 func TestReferenceAttachmentsKeepsOrderAndDropsEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -131,9 +130,9 @@ func TestReferenceAttachmentsKeepsOrderAndDropsEmpty(t *testing.T) {
 	assert.Equal(t, "gs://bucket/b.webp", got[1].URI)
 }
 
-// TestReferenceAttachmentsHintsMIMETypeFromExtension は、拡張子から MIME type を推測し、
-// 判別できない場合は申告しないことを検証します。誤った申告は受け取った側の解釈を
-// 壊すため、サーバー側の判定に委ねます。
+// TestReferenceAttachmentsHintsMIMETypeFromExtension checks that the MIME type is guessed from
+// the extension, and not declared when it cannot be determined. A wrong declaration breaks the
+// receiver's interpretation, so the decision is left to the server.
 func TestReferenceAttachmentsHintsMIMETypeFromExtension(t *testing.T) {
 	t.Parallel()
 
@@ -147,7 +146,7 @@ func TestReferenceAttachmentsHintsMIMETypeFromExtension(t *testing.T) {
 	require.Len(t, got, 3)
 	assert.Equal(t, "image/png", got[0].MIMEType)
 	assert.Equal(t, "image/jpeg", got[1].MIMEType)
-	assert.Empty(t, got[2].MIMEType, "判別できない拡張子は申告しない")
+	assert.Empty(t, got[2].MIMEType, "an unrecognised extension is not declared")
 }
 
 func TestReferenceAttachmentsRejectsNonGCSURIs(t *testing.T) {
@@ -160,11 +159,11 @@ func TestReferenceAttachmentsRejectsNonGCSURIs(t *testing.T) {
 	}
 }
 
-// TestReferenceAttachmentsAcceptsInlineBytes は、呼び出し側が取得済みのバイト列を
-// gs:// と混ぜた順序のまま渡せることを検証します。
+// TestReferenceAttachmentsAcceptsInlineBytes checks that bytes the caller already fetched can be
+// passed interleaved with gs:// in their original order.
 //
-// 順序は生成結果を変えるため、gs:// とバイト列を別のリストに分けると混在した並びを
-// 表現できません。References が 1 本なのはそのためです。
+// Order changes the result, so splitting gs:// and bytes into separate lists could not express
+// a mixed sequence. That is why References is a single list.
 func TestReferenceAttachmentsAcceptsInlineBytes(t *testing.T) {
 	t.Parallel()
 
@@ -176,16 +175,16 @@ func TestReferenceAttachmentsAcceptsInlineBytes(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	require.Len(t, got, 3, "送るものが無い要素は黙って外れる")
+	require.Len(t, got, 3, "elements with nothing to send are silently dropped")
 	assert.Equal(t, "gs://bucket/a.png", got[0].URI)
 	assert.Equal(t, []byte("fetched"), got[1].Data)
 	assert.Equal(t, "image/webp", got[1].MIMEType)
 	assert.Equal(t, "gs://bucket/b.png", got[2].URI)
 }
 
-// TestReferenceAttachmentsRequiresMIMETypeForInlineBytes は、バイト列に MIME type が
-// 要ることを検証します。バイト列からは型が決まらず、誤った申告は受け取り側の解釈を
-// 壊すため、推測せずに要求します。
+// TestReferenceAttachmentsRequiresMIMETypeForInlineBytes checks that bytes need a MIME type.
+// The type cannot be determined from the bytes, and a wrong declaration breaks the receiver's
+// interpretation, so it is required rather than guessed.
 func TestReferenceAttachmentsRequiresMIMETypeForInlineBytes(t *testing.T) {
 	t.Parallel()
 
@@ -196,9 +195,9 @@ func TestReferenceAttachmentsRequiresMIMETypeForInlineBytes(t *testing.T) {
 	assert.ErrorIs(t, err, ErrMissingReferenceMIMEType)
 }
 
-// TestReferenceAttachmentsRejectsBothInputs は、Images と References の併用を
-// 弾くことを検証します。2 本のリストの間の順序を決める根拠が無く、黙って連結すると
-// 呼び出し側が意図しない並びで送られます。
+// TestReferenceAttachmentsRejectsBothInputs checks that using Images and References together
+// is refused. There is no basis for ordering the two lists against each other, and silently
+// joining them would send them in an order the caller did not intend.
 func TestReferenceAttachmentsRejectsBothInputs(t *testing.T) {
 	t.Parallel()
 
@@ -210,8 +209,8 @@ func TestReferenceAttachmentsRejectsBothInputs(t *testing.T) {
 	assert.ErrorIs(t, err, ErrConflictingReferences)
 }
 
-// TestNewSeedStaysWithinInt32 は、採番したシードが gemini の受け付ける範囲に
-// 収まることを検証します。範囲外は ErrInvalidSeed で弾かれます。
+// TestNewSeedStaysWithinInt32 checks that a picked seed stays within the range gemini accepts.
+// Values outside it are refused with ErrInvalidSeed.
 func TestNewSeedStaysWithinInt32(t *testing.T) {
 	t.Parallel()
 
@@ -233,9 +232,9 @@ func TestSeedOrZero(t *testing.T) {
 	assert.Zero(t, seedOrZero(nil))
 }
 
-// TestRequestPromotesGenerateOptions は、埋め込みによる昇格でフィールドが
-// そのまま設定できることを検証します。写し取りではなく埋め込みにしているのは、
-// gemini 側の項目追加のたびに 2 か所を同期しないためです。
+// TestRequestPromotesGenerateOptions checks that fields can be set directly through promotion
+// by embedding. It embeds rather than copies so that two places need not be kept in sync every
+// time gemini adds a field.
 func TestRequestPromotesGenerateOptions(t *testing.T) {
 	t.Parallel()
 
@@ -244,7 +243,7 @@ func TestRequestPromotesGenerateOptions(t *testing.T) {
 	req.AspectRatio = "16:9"
 	req.Temperature = new(float32(0))
 
-	// 昇格したフィールドへの代入が、埋め込んだ値そのものに届いていること。
+	// Assignments to the promoted fields reach the embedded value itself.
 	opts := req.GenerateOptions
 	assert.Equal(t, "system", opts.SystemPrompt)
 	assert.Equal(t, "16:9", opts.AspectRatio)
@@ -252,8 +251,8 @@ func TestRequestPromotesGenerateOptions(t *testing.T) {
 	assert.Zero(t, *opts.Temperature)
 }
 
-// TestPrepareForwardsPromotedOptions は、昇格したフィールドが送信オプションへ
-// そのまま乗ることを検証します。
+// TestPrepareForwardsPromotedOptions checks that the promoted fields are carried into the
+// sending options as is.
 func TestPrepareForwardsPromotedOptions(t *testing.T) {
 	t.Parallel()
 
