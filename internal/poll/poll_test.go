@@ -10,20 +10,20 @@ import (
 	"time"
 )
 
-// newLoop は、仮想時計向けの設定で Loop を作ります。値は実運用に近いものを使います
-// （バブル内では実時間を消費しません）。
+// newLoop builds a Loop with settings for the virtual clock. The values are close to production
+// ones (they consume no real time inside the bubble).
 func newLoop(maxErrors int) Loop {
 	return Loop{
 		Interval:  10 * time.Second,
 		Timeout:   5 * time.Minute,
 		MaxErrors: maxErrors,
-		Subject:   `対象 "x"`,
+		Subject:   `target "x"`,
 	}
 }
 
-// TestRunPollsImmediately は、1 回目の問い合わせを間隔待ちなしで行うことを検証します。
-// 待ちを別実行から再開する経路では対象が既に完了していることが多く、そこで 1 interval
-// 分待つのは純粋な死に時間になります。
+// TestRunPollsImmediately checks that the first query is made without waiting for the interval.
+// On the path that resumes waiting from a different execution, the target has often already
+// completed, and waiting one interval there is pure dead time.
 func TestRunPollsImmediately(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
@@ -38,13 +38,13 @@ func TestRunPollsImmediately(t *testing.T) {
 			t.Errorf("value = %q, want done", got)
 		}
 		if elapsed := time.Since(start); elapsed != 0 {
-			t.Errorf("elapsed = %v, want 0（間隔を待たずに 1 回目を撃つ）", elapsed)
+			t.Errorf("elapsed = %v, want 0 (fire the first query without waiting for the interval)", elapsed)
 		}
 	})
 }
 
-// TestRunWaitsIntervalBetweenAttempts は、2 回目以降が間隔ちょうど空くことを
-// 検証します。仮想時計なので、待たされた時間は設定値に一致します。
+// TestRunWaitsIntervalBetweenAttempts checks that the second and later attempts are spaced exactly
+// one interval apart. With the virtual clock, the time waited matches the configured value.
 func TestRunWaitsIntervalBetweenAttempts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		loop := newLoop(3)
@@ -58,19 +58,19 @@ func TestRunWaitsIntervalBetweenAttempts(t *testing.T) {
 			t.Fatalf("Run() error = %v", err)
 		}
 
-		// 1 回目は即時、2・3 回目が間隔を挟むので合計 2 間隔。
+		// The first is immediate and the second and third each wait an interval, so two intervals in total.
 		if elapsed := time.Since(start); elapsed != 2*loop.Interval {
 			t.Errorf("elapsed = %v, want %v", elapsed, 2*loop.Interval)
 		}
 	})
 }
 
-// TestRunReturnsTerminalError は、完了として返された失敗をそのまま返すことを
-// 検証します。サーバー側の処理失敗のように待っても変わらない状態を、一時的な
-// 失敗として数え直すと無駄に粘ることになります。
+// TestRunReturnsTerminalError checks that a failure returned as completed is returned as is.
+// Counting a state that waiting will not change, such as a server-side processing failure, as a
+// transient failure would mean holding on pointlessly.
 func TestRunReturnsTerminalError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		sentinel := errors.New("処理に失敗しました")
+		sentinel := errors.New("processing failed")
 		calls := 0
 
 		_, err := newLoop(3).Run(context.Background(), func(context.Context) (int, bool, error) {
@@ -79,23 +79,23 @@ func TestRunReturnsTerminalError(t *testing.T) {
 		})
 
 		if !errors.Is(err, sentinel) {
-			t.Fatalf("Run() error = %v, want 終端の失敗", err)
+			t.Fatalf("Run() error = %v, want the terminal failure", err)
 		}
 		if calls != 1 {
-			t.Errorf("calls = %d, want 1（終端状態は再確認しない）", calls)
+			t.Errorf("calls = %d, want 1 (a terminal state is not checked again)", calls)
 		}
 	})
 }
 
-// TestRunToleratesTransientErrors は、一時的な失敗を受け流して待ち続け、成功したら
-// 連続失敗のカウントが戻ることを検証します。カウントが戻らないと、長い待機の中で
-// 散発する失敗が積算されて打ち切られます。
+// TestRunToleratesTransientErrors checks that transient failures are tolerated and waiting
+// continues, and that the consecutive-failure count resets on success. Without the reset,
+// sporadic failures over a long wait would accumulate and cut it off.
 func TestRunToleratesTransientErrors(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		results := []error{
 			errors.New("blip 1"),
 			errors.New("blip 2"),
-			nil, // ここでカウントがリセットされる
+			nil, // the count resets here
 			errors.New("blip 3"),
 			errors.New("blip 4"),
 			nil,
@@ -123,13 +123,13 @@ func TestRunToleratesTransientErrors(t *testing.T) {
 			t.Errorf("value = %q, want done", got)
 		}
 		if want := []int{1, 2, 1, 2}; !slices.Equal(observed, want) {
-			t.Errorf("連続失敗の回数 = %v, want %v（成功で数え直す）", observed, want)
+			t.Errorf("consecutive failure counts = %v, want %v (reset on success)", observed, want)
 		}
 	})
 }
 
-// TestRunStopsAfterConsecutiveErrors は、確認が続けて失敗したら制限時間まで粘らずに
-// 打ち切り、分類用センチネルと最後の原因の両方を辿れることを検証します。
+// TestRunStopsAfterConsecutiveErrors checks that repeated check failures give up without
+// holding on until the time limit, and that both the classification sentinel and the last cause can be reached.
 func TestRunStopsAfterConsecutiveErrors(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sentinel := errors.New("poll: failed")
@@ -145,19 +145,19 @@ func TestRunStopsAfterConsecutiveErrors(t *testing.T) {
 		})
 
 		if !errors.Is(err, sentinel) {
-			t.Fatalf("Run() error = %v, want RepeatedFailure センチネル", err)
+			t.Fatalf("Run() error = %v, want the RepeatedFailure sentinel", err)
 		}
 		if !errors.Is(err, cause) {
-			t.Errorf("Run() error = %v, want 原因が辿れること", err)
+			t.Errorf("Run() error = %v, want the cause to be reachable", err)
 		}
 		if calls != 3 {
-			t.Errorf("calls = %d, want 3（許容回数で打ち切る）", calls)
+			t.Errorf("calls = %d, want 3 (give up at the tolerated count)", calls)
 		}
 	})
 }
 
-// TestRunStopsAfterConsecutiveErrorsWithoutSentinel は、分類用センチネルを持たない
-// 呼び出し側でも、回数と原因が残ることを検証します。
+// TestRunStopsAfterConsecutiveErrorsWithoutSentinel checks that the count and the cause remain
+// even for callers that have no classification sentinel.
 func TestRunStopsAfterConsecutiveErrorsWithoutSentinel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cause := errors.New("network down")
@@ -167,16 +167,16 @@ func TestRunStopsAfterConsecutiveErrorsWithoutSentinel(t *testing.T) {
 		})
 
 		if !errors.Is(err, cause) {
-			t.Fatalf("Run() error = %v, want 原因が辿れること", err)
+			t.Fatalf("Run() error = %v, want the cause to be reachable", err)
 		}
-		if !strings.Contains(err.Error(), "2 回連続で失敗") {
-			t.Errorf("error = %q, want 回数を含むこと", err)
+		if !strings.Contains(err.Error(), "failed 2 times in a row") {
+			t.Errorf("error = %q, want it to include the count", err)
 		}
 	})
 }
 
-// TestRunMaxErrorsFloorsAtOne は、MaxErrors がゼロ以下でも 1 回目の失敗で
-// 打ち切ることを検証します。0 をそのまま使うと打ち切り条件が成立しません。
+// TestRunMaxErrorsFloorsAtOne checks that even with MaxErrors at zero or below, the first
+// failure gives up. Using 0 as is would mean the give-up condition is never met.
 func TestRunMaxErrorsFloorsAtOne(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
@@ -187,7 +187,7 @@ func TestRunMaxErrorsFloorsAtOne(t *testing.T) {
 		})
 
 		if err == nil {
-			t.Fatal("Run() error = nil, want 打ち切り")
+			t.Fatal("Run() error = nil, want it to give up")
 		}
 		if calls != 1 {
 			t.Errorf("calls = %d, want 1", calls)
@@ -195,7 +195,7 @@ func TestRunMaxErrorsFloorsAtOne(t *testing.T) {
 	})
 }
 
-// TestRunTimesOut は、完了しないまま制限時間に達した場合に打ち切ることを検証します。
+// TestRunTimesOut checks that the wait gives up when the time limit is reached without completion.
 func TestRunTimesOut(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, err := newLoop(3).Run(context.Background(), func(context.Context) (int, bool, error) {
@@ -203,20 +203,20 @@ func TestRunTimesOut(t *testing.T) {
 		})
 
 		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("Run() error = %v, want 期限切れ", err)
+			t.Fatalf("Run() error = %v, want a deadline exceeded", err)
 		}
-		if !strings.Contains(err.Error(), "制限時間") {
-			t.Errorf("error = %q, want 制限時間に達したと言うこと", err)
+		if !strings.Contains(err.Error(), "time limit") {
+			t.Errorf("error = %q, want it to say the time limit was reached", err)
 		}
 	})
 }
 
-// TestRunTimeoutBoundsInFlightCall は、応答を返さない問い合わせが制限時間で
-// 打ち切られることを検証します。
+// TestRunTimeoutBoundsInFlightCall checks that a query that never responds is cut off at the
+// time limit.
 //
-// このパッケージが存在する理由がこれです。genai の既定 HTTP クライアントは
-// タイムアウトを持たないため、制限時間を問い合わせの合間でしか見張らない実装では、
-// 1 回の中で止まったまま時間切れの判定へ到達できません。
+// This is why the package exists. genai's default HTTP client has no timeout, so an
+// implementation that only watches the time limit between queries can get stuck inside one
+// query and never reach the timeout check.
 func TestRunTimeoutBoundsInFlightCall(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
@@ -228,17 +228,17 @@ func TestRunTimeoutBoundsInFlightCall(t *testing.T) {
 		})
 
 		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("Run() error = %v, want 期限切れ", err)
+			t.Fatalf("Run() error = %v, want a deadline exceeded", err)
 		}
 		if calls != 1 {
-			t.Errorf("calls = %d, want 1（問い合わせの中で打ち切られる）", calls)
+			t.Errorf("calls = %d, want 1 (cut off inside the query)", calls)
 		}
 	})
 }
 
-// TestRunStopsWhenCallerCancels は、呼び出し元のキャンセルを自前の時間切れと
-// 区別することを検証します。前者は上位の判断、後者は対象の処理が長すぎるという
-// 別の事象で、呼び出し側の対処が変わります。
+// TestRunStopsWhenCallerCancels checks that the caller's cancellation is told apart from our own
+// timeout. The former is an upstream decision and the latter means the target's processing takes
+// too long; they are different events that call for different responses from the caller.
 func TestRunStopsWhenCallerCancels(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -251,8 +251,8 @@ func TestRunStopsWhenCallerCancels(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("Run() error = %v, want context.Canceled", err)
 		}
-		if strings.Contains(err.Error(), "制限時間") {
-			t.Errorf("error = %q, want キャンセルを時間切れとして報告しないこと", err)
+		if strings.Contains(err.Error(), "time limit") {
+			t.Errorf("error = %q, want a cancellation not reported as a timeout", err)
 		}
 	})
 }

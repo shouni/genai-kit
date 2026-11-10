@@ -12,12 +12,12 @@ func TestGenerateOptionsHasImageConfig(t *testing.T) {
 		opts *GenerateOptions
 		want bool
 	}{
-		{"nil レシーバ", nil, false},
-		{"設定なし", &GenerateOptions{}, false},
-		{"AspectRatio あり", &GenerateOptions{AspectRatio: "16:9"}, true},
-		{"ImageSize あり", &GenerateOptions{ImageSize: "1K"}, true},
-		{"PersonGeneration あり", &GenerateOptions{PersonGeneration: PersonGenerationAllowAll}, true},
-		{"画像以外のみ", &GenerateOptions{SystemPrompt: "test"}, false},
+		{"nil receiver", nil, false},
+		{"no settings", &GenerateOptions{}, false},
+		{"with AspectRatio", &GenerateOptions{AspectRatio: "16:9"}, true},
+		{"with ImageSize", &GenerateOptions{ImageSize: "1K"}, true},
+		{"with PersonGeneration", &GenerateOptions{PersonGeneration: PersonGenerationAllowAll}, true},
+		{"non-image settings only", &GenerateOptions{SystemPrompt: "test"}, false},
 	}
 
 	for _, tt := range tests {
@@ -29,9 +29,9 @@ func TestGenerateOptionsHasImageConfig(t *testing.T) {
 	}
 }
 
-// TestNewSafetySettings は、標準の 4 カテゴリすべてに同じ閾値が載ることを検証します。
-// 1 つでも漏れるとそのカテゴリだけ API 既定の閾値で動き、意図した緩和／厳格化が
-// 部分的にしか効きません。
+// TestNewSafetySettings checks that the same threshold is set on all four standard categories.
+// If even one is missing, that category runs at the API's default threshold, and the intended
+// loosening or tightening only partly takes effect.
 func TestNewSafetySettings(t *testing.T) {
 	got := NewSafetySettings(SafetyBlockNone)
 
@@ -42,7 +42,7 @@ func TestNewSafetySettings(t *testing.T) {
 		genai.HarmCategoryDangerousContent,
 	}
 	if len(got) != len(want) {
-		t.Fatalf("settings = %d 件, want %d 件", len(got), len(want))
+		t.Fatalf("settings = %d entries, want %d entries", len(got), len(want))
 	}
 	for i, category := range want {
 		if got[i].Category != category {
@@ -54,12 +54,12 @@ func TestNewSafetySettings(t *testing.T) {
 	}
 }
 
-// TestSchemaAliasReachesSDKUnchanged は、このパッケージの別名で書いたスキーマが
-// そのまま SDK へ渡ることを検証します。
+// TestSchemaAliasReachesSDKUnchanged checks that a schema written with this package's alias
+// reaches the SDK unchanged.
 //
-// 別名を用意したのは、構造化出力のためだけに下流が genai を import するのを
-// 止めるためです。それが成り立つのは「同じ型」である場合だけなので、
-// この比較がコンパイルできること自体が検証になっています。
+// The alias exists to keep downstream code from importing genai just for structured
+// output. That only holds if it is "the same type", so the fact that this comparison
+// compiles is itself the check.
 func TestSchemaAliasReachesSDKUnchanged(t *testing.T) {
 	schema := &Schema{
 		Type: TypeObject,
@@ -78,17 +78,17 @@ func TestSchemaAliasReachesSDKUnchanged(t *testing.T) {
 		t.Fatalf("buildGenerateConfig() error = %v", err)
 	}
 
-	// cfg.ResponseSchema は *genai.Schema。同一ポインタで比較できるのは別名だからです。
+	// cfg.ResponseSchema is *genai.Schema. It can be compared as the same pointer because it is an alias.
 	if cfg.ResponseSchema != schema {
-		t.Fatalf("ResponseSchema = %+v, want 渡したスキーマそのもの", cfg.ResponseSchema)
+		t.Fatalf("ResponseSchema = %+v, want the schema that was passed in", cfg.ResponseSchema)
 	}
 	if cfg.ResponseSchema.Type != genai.TypeObject {
 		t.Errorf("Type = %q, want %q", cfg.ResponseSchema.Type, genai.TypeObject)
 	}
 }
 
-// TestReExportedConstantsMatchSDK は、再エクスポートした定数が SDK の値と一致することを
-// 検証します。ずれると「genai を import せずに値を選べる」という前提が崩れます。
+// TestReExportedConstantsMatchSDK checks that the re-exported constants match the SDK's values.
+// If they drift, the premise that "a value can be picked without importing genai" breaks.
 func TestReExportedConstantsMatchSDK(t *testing.T) {
 	thinking := map[ThinkingLevel]genai.ThinkingLevel{
 		ThinkingUnspecified: genai.ThinkingLevelUnspecified,

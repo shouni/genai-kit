@@ -14,28 +14,28 @@ func TestAPIResponseErrorMessage(t *testing.T) {
 		want string
 	}{
 		{
-			name: "Message を優先する",
-			err:  &APIResponseError{Reason: ErrBlocked, Message: "明示メッセージ"},
-			want: "明示メッセージ",
+			name: "prefers Message",
+			err:  &APIResponseError{Reason: ErrBlocked, Message: "explicit message"},
+			want: "explicit message",
 		},
 		{
-			name: "Message が空なら FinishReason から組み立てる",
+			name: "builds from FinishReason when Message is empty",
 			err:  &APIResponseError{Reason: ErrBlocked, FinishReason: genai.FinishReasonSafety},
-			want: "生成がブロックされました（理由: SAFETY）",
+			want: "generation was blocked (reason: SAFETY)",
 		},
 		{
-			name: "Message も FinishReason も無ければ Reason を返す",
+			name: "returns Reason when neither Message nor FinishReason is set",
 			err:  &APIResponseError{Reason: ErrEmptyResponse},
 			want: ErrEmptyResponse.Error(),
 		},
 		{
-			// ゼロ値の FinishReason を「理由あり」と誤認すると、空の理由が文面に出ます。
-			name: "FinishReason がゼロ値なら理由として扱わない",
+			// Mistaking a zero-value FinishReason for "has a reason" puts an empty reason in the text.
+			name: "does not treat a zero-value FinishReason as a reason",
 			err:  &APIResponseError{Reason: ErrEmptyResponse, FinishReason: ""},
 			want: ErrEmptyResponse.Error(),
 		},
 		{
-			name: "何も無ければ既定メッセージ",
+			name: "default message when nothing is set",
 			err:  &APIResponseError{},
 			want: "gemini: API response error",
 		},
@@ -50,18 +50,18 @@ func TestAPIResponseErrorMessage(t *testing.T) {
 	}
 }
 
-// TestAPIResponseErrorUnwrap は、Unwrap が分類用センチネルを返し、
-// errors.Is / errors.AsType の両方で判定できることを検証します。
-// 公開のエラー契約はこの形で使われる前提です。
+// TestAPIResponseErrorUnwrap checks that Unwrap returns the classification sentinel, and
+// that it can be classified with both errors.Is and errors.AsType.
+// The public error contract assumes it is used this way.
 func TestAPIResponseErrorUnwrap(t *testing.T) {
-	t.Run("Reason で分類できること", func(t *testing.T) {
+	t.Run("can be classified by Reason", func(t *testing.T) {
 		err := newFinishReasonError(genai.FinishReasonRecitation)
 
 		if !errors.Is(err, ErrBlocked) {
-			t.Error("ErrBlocked に一致しません")
+			t.Error("does not match ErrBlocked")
 		}
 		if errors.Is(err, ErrEmptyResponse) {
-			t.Error("ErrEmptyResponse に誤って一致しています")
+			t.Error("wrongly matches ErrEmptyResponse")
 		}
 		apiErr, ok := errors.AsType[*APIResponseError](err)
 		if !ok {
@@ -72,20 +72,20 @@ func TestAPIResponseErrorUnwrap(t *testing.T) {
 		}
 	})
 
-	t.Run("空レスポンスは ErrEmptyResponse に分類されること", func(t *testing.T) {
+	t.Run("an empty response is classified as ErrEmptyResponse", func(t *testing.T) {
 		err := newEmptyResponseError()
 
 		if !errors.Is(err, ErrEmptyResponse) {
-			t.Error("ErrEmptyResponse に一致しません")
+			t.Error("does not match ErrEmptyResponse")
 		}
 		if !isUnsetFinishReason(err.FinishReason) {
-			t.Errorf("FinishReason = %q, want 未設定", err.FinishReason)
+			t.Errorf("FinishReason = %q, want unset", err.FinishReason)
 		}
 	})
 
-	t.Run("Reason が nil でも panic しないこと", func(t *testing.T) {
+	t.Run("does not panic when Reason is nil", func(t *testing.T) {
 		if errors.Unwrap(&APIResponseError{Message: "x"}) != nil {
-			t.Error("Reason が nil なら Unwrap は nil を返すべきです")
+			t.Error("Unwrap should return nil when Reason is nil")
 		}
 	})
 }

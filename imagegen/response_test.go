@@ -16,18 +16,18 @@ func newPrepared(seed *int64) preparedRequest {
 	}
 }
 
-// TestToResponseTakesFirstInlineImage は、最初のインライン画像を MIME type ごと
-// 取り出すことを検証します。
+// TestToResponseTakesFirstInlineImage checks that the first inline image is extracted along
+// with its MIME type.
 //
-// gemini.Response.Attachments が MIME type 込みで返るため、保存時の Content-Type を
-// 決めるのに生の SDK レスポンスを辿る必要はありません。
+// gemini.Response.Attachments come back with their MIME type, so there is no need to walk the
+// raw SDK response to decide the Content-Type when saving.
 func TestToResponseTakesFirstInlineImage(t *testing.T) {
 	seed := int64(42)
 	usage := &gemini.TokenUsage{PromptTokenCount: 10, TotalTokenCount: 12}
 
 	got, err := newPrepared(&seed).toResponse(&gemini.Response{
 		Attachments: []gemini.Attachment{
-			{MIMEType: "image/png"}, // データの無い添付は読み飛ばす
+			{MIMEType: "image/png"}, // an attachment with no data is skipped
 			{MIMEType: "image/webp", Data: []byte("webp-bytes")},
 			{MIMEType: "image/png", Data: []byte("png-bytes")},
 		},
@@ -43,18 +43,18 @@ func TestToResponseTakesFirstInlineImage(t *testing.T) {
 	assert.Same(t, usage, got.Usage)
 }
 
-// TestToResponseTakesOutputURI は、OutputURIPrefix の指定で GCS に書き込まれた画像を
-// URI として返すことを検証します。サーバーが MIME type を添えなかった場合は、
-// 書き込み先の拡張子から補います。
+// TestToResponseTakesOutputURI checks that an image written to GCS because OutputURIPrefix was
+// specified is returned as a URI. When the server did not attach a MIME type, it is filled in
+// from the destination's extension.
 func TestToResponseTakesOutputURI(t *testing.T) {
 	tests := []struct {
 		name     string
 		in       gemini.Attachment
 		wantMIME string
 	}{
-		{"サーバーの MIME type をそのまま使う", gemini.Attachment{URI: "gs://b/out/1", MIMEType: "image/webp"}, "image/webp"},
-		{"無ければ拡張子から補う", gemini.Attachment{URI: "gs://b/out/1.png"}, "image/png"},
-		{"拡張子でも分からなければ空のまま", gemini.Attachment{URI: "gs://b/out/1"}, ""},
+		{"uses the server's MIME type as is", gemini.Attachment{URI: "gs://b/out/1", MIMEType: "image/webp"}, "image/webp"},
+		{"falls back to the extension when absent", gemini.Attachment{URI: "gs://b/out/1.png"}, "image/png"},
+		{"stays empty when the extension does not tell either", gemini.Attachment{URI: "gs://b/out/1"}, ""},
 	}
 
 	for _, tt := range tests {
@@ -71,17 +71,17 @@ func TestToResponseTakesOutputURI(t *testing.T) {
 	}
 }
 
-// TestToResponseReportsMissingImage は、画像が無い応答を区別できるエラーにすることを
-// 検証します。安全フィルタによるブロックは gemini 側でエラーになるため、このパッケージが
-// 区別するのは「画像データが無い」ことだけです。
+// TestToResponseReportsMissingImage checks that a response with no image becomes a
+// distinguishable error. A block by a safety filter becomes an error on the gemini side,
+// so the only thing this package distinguishes is "no image data".
 func TestToResponseReportsMissingImage(t *testing.T) {
 	tests := []struct {
 		name string
 		resp *gemini.Response
 	}{
-		{"レスポンスが nil", nil},
-		{"添付が無い", &gemini.Response{Text: "説明だけ"}},
-		{"添付はあるがデータが空", &gemini.Response{Attachments: []gemini.Attachment{{MIMEType: "image/png"}}}},
+		{"response is nil", nil},
+		{"no attachments", &gemini.Response{Text: "description only"}},
+		{"attachment present but data empty", &gemini.Response{Attachments: []gemini.Attachment{{MIMEType: "image/png"}}}},
 	}
 
 	for _, tt := range tests {
@@ -93,9 +93,9 @@ func TestToResponseReportsMissingImage(t *testing.T) {
 	}
 }
 
-// TestToResponseRecordsZeroSeedWhenUnset は、シード未指定（WithoutAutoSeed）で
-// UsedSeed が 0 になることを検証します。自動採番が既定なのは、この 0 が「API が
-// 選んだシード」と区別できないからです。
+// TestToResponseRecordsZeroSeedWhenUnset checks that UsedSeed is 0 when no seed is set
+// (WithoutAutoSeed). Automatic seeding is the default because this 0 cannot be told apart
+// from "a seed the API picked".
 func TestToResponseRecordsZeroSeedWhenUnset(t *testing.T) {
 	got, err := newPrepared(nil).toResponse(&gemini.Response{
 		Attachments: []gemini.Attachment{{MIMEType: "image/png", Data: []byte("x")}},

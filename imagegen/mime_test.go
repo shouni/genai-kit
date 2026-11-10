@@ -6,11 +6,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestExtensionByMIMEType は、保存ファイルの拡張子の引き当てを検証します。
+// TestExtensionByMIMEType checks the lookup of the saved file's extension.
 //
-// 判定できない MIME type を既定値（.png）へ倒すのは、mimeTypeByPath が空文字列で
-// 判定を委ねるのとは逆ですが、実害が違うためです。拡張子の誤りは保存パスの見た目に
-// 留まり、生成済みの画像を保存できずに捨てるほうが損失は大きくなります。
+// Falling back to the default (.png) for an unrecognised MIME type is the opposite of
+// mimeTypeByPath, which defers with an empty string, because the damage differs. A wrong
+// extension only affects how the saved path looks, while failing to save a generated image and discarding it loses more.
 func TestExtensionByMIMEType(t *testing.T) {
 	t.Parallel()
 
@@ -22,14 +22,14 @@ func TestExtensionByMIMEType(t *testing.T) {
 		"IMAGE/PNG":                ".png",
 		"  image/png  ":            ".png",
 		"image/png; charset=utf-8": ".png",
-		// image/jpg は正式な MIME type ではありませんが、生成モデルの応答や
-		// 手書きの設定値では実際に現れます。既定へ倒すと中身と食い違います。
+		// image/jpg is not an official MIME type, but it does appear in generation model
+		// responses and hand-written settings. Falling back to the default would contradict the content.
 		"image/jpg": ".jpg",
-		// 判定できないものは既定値へ倒す。
+		// Anything unrecognised falls back to the default.
 		"application/octet-stream": ".png",
 		"":                         ".png",
 		"not a mime type":          ".png",
-		// パラメーターが壊れていてもメディアタイプ自体は拾える。
+		// Even with broken parameters, the media type itself is picked up.
 		"image/webp; =broken": ".webp",
 	}
 
@@ -40,9 +40,9 @@ func TestExtensionByMIMEType(t *testing.T) {
 	}
 }
 
-// TestMimeTypeByPath は、パスや URI の拡張子からの引き当てを検証します。
-// 判定できない場合に空文字列を返すのは、誤った型の申告が受け取った側の解釈を
-// そのまま壊すためです。
+// TestMimeTypeByPath checks the lookup from a path's or URI's extension.
+// It returns an empty string when it cannot tell, because a wrongly declared type directly
+// breaks the receiver's interpretation.
 func TestMimeTypeByPath(t *testing.T) {
 	t.Parallel()
 
@@ -57,9 +57,9 @@ func TestMimeTypeByPath(t *testing.T) {
 		"gs://bucket/a":      "",
 		"gs://bucket/a.txt":  "",
 		"":                   "",
-		// 署名付き URL のようなクエリ付きでも、パス部分の拡張子を見る。
-		// 素の filepath.Ext は ".png?X-Goog-Signature=..." を返すため、
-		// 最も一般的な URL の形で常に判定不能になります。
+		// Even with a query, as in a signed URL, the extension of the path part is used.
+		// A plain filepath.Ext returns ".png?X-Goog-Signature=...", so the most common URL
+		// shape would always be unrecognised.
 		"https://storage.googleapis.com/bucket/a.png?X-Goog-Signature=abc": "image/png",
 	}
 
@@ -70,13 +70,13 @@ func TestMimeTypeByPath(t *testing.T) {
 	}
 }
 
-// TestMIMETablesStayInSync は、2 つの対応表が同じフォーマット集合を扱っていることを
-// 検証します。片方だけにフォーマットを足すと、送信時と保存時で扱いが食い違います。
+// TestMIMETablesStayInSync checks that the two tables cover the same set of formats.
+// Adding a format to only one of them makes sending and saving disagree.
 func TestMIMETablesStayInSync(t *testing.T) {
 	t.Parallel()
 
-	// mimeTypeByPath が返しうる MIME type は、すべて ExtensionByMIMEType が
-	// 既定値以外の拡張子で受けられること。
+	// Every MIME type mimeTypeByPath can return must be accepted by ExtensionByMIMEType
+	// with an extension other than the default.
 	pathToMIME := map[string]string{
 		".png":  "image/png",
 		".jpg":  "image/jpeg",

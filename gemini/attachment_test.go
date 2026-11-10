@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// TestAttachmentPartsBuildsTextThenInlineData は、プロンプトが先頭に来て添付が
-// 順序どおり続くことを検証します。
+// TestAttachmentPartsBuildsTextThenInlineData checks that the prompt comes first and the
+// attachments follow in order.
 func TestAttachmentPartsBuildsTextThenInlineData(t *testing.T) {
 	parts, err := attachmentParts("describe this", []Attachment{
 		{MIMEType: "audio/mpeg", Data: []byte("song")},
@@ -21,7 +21,7 @@ func TestAttachmentPartsBuildsTextThenInlineData(t *testing.T) {
 		t.Fatalf("parts = %d, want 3", len(parts))
 	}
 	if parts[0].Text != "describe this" {
-		t.Errorf("parts[0].Text = %q, want プロンプトが先頭", parts[0].Text)
+		t.Errorf("parts[0].Text = %q, want the prompt first", parts[0].Text)
 	}
 
 	want := []Attachment{
@@ -39,8 +39,8 @@ func TestAttachmentPartsBuildsTextThenInlineData(t *testing.T) {
 	}
 }
 
-// TestAttachmentPartsSkipsEmptyAttachments は、空の添付が落ちることを検証します。
-// 呼び出し側は画像を「あれば渡す」形で組み立てるため、空要素の除去を毎回書かせません。
+// TestAttachmentPartsSkipsEmptyAttachments checks that empty attachments are dropped.
+// Callers build images as "pass it if there is one", so they are not made to strip empty elements every time.
 func TestAttachmentPartsSkipsEmptyAttachments(t *testing.T) {
 	parts, err := attachmentParts("prompt", []Attachment{
 		{MIMEType: "image/png"},
@@ -50,28 +50,28 @@ func TestAttachmentPartsSkipsEmptyAttachments(t *testing.T) {
 		t.Fatalf("attachmentParts() error = %v", err)
 	}
 	if len(parts) != 2 {
-		t.Fatalf("parts = %d, want 2（空の添付は落ちる）", len(parts))
+		t.Fatalf("parts = %d, want 2 (empty attachments are dropped)", len(parts))
 	}
 }
 
-// TestAttachmentPartsAllowsAttachmentOnlyRequests は、プロンプト無しでも添付だけで
-// 送信できることを検証します。音声や画像だけを渡して解析させる用途があります。
+// TestAttachmentPartsAllowsAttachmentOnlyRequests checks that a request can be sent with
+// attachments alone and no prompt. There are uses that pass only audio or images to have them analysed.
 func TestAttachmentPartsAllowsAttachmentOnlyRequests(t *testing.T) {
 	parts, err := attachmentParts("", []Attachment{{MIMEType: "audio/mpeg", Data: []byte("song")}})
 	if err != nil {
 		t.Fatalf("attachmentParts() error = %v", err)
 	}
 	if len(parts) != 1 || parts[0].InlineData == nil {
-		t.Fatalf("parts = %+v, want インラインデータ 1 件だけ", parts)
+		t.Fatalf("parts = %+v, want exactly one inline data part", parts)
 	}
 }
 
-// TestAttachmentPartsRejectsEmptyRequests は、送るものが何も無い場合をエラーにする
-// ことを検証します。空のリクエストを送ると API 側の分かりにくいエラーになります。
+// TestAttachmentPartsRejectsEmptyRequests checks that having nothing to send is an error.
+// Sending an empty request results in a hard-to-understand error from the API.
 func TestAttachmentPartsRejectsEmptyRequests(t *testing.T) {
 	tests := map[string][]Attachment{
-		"プロンプトも添付も無い": nil,
-		"空の添付だけ":      {{MIMEType: "image/png"}},
+		"neither prompt nor attachments": nil,
+		"only empty attachments":         {{MIMEType: "image/png"}},
 	}
 
 	for name, attachments := range tests {
@@ -83,8 +83,8 @@ func TestAttachmentPartsRejectsEmptyRequests(t *testing.T) {
 	}
 }
 
-// TestAttachmentPartsRequiresMIMETypeForInlineData は、バイト列に MIME type が
-// 無い場合にエラーになることを検証します。API は推測できません。
+// TestAttachmentPartsRequiresMIMETypeForInlineData checks that bytes without a MIME type
+// are an error. The API cannot guess it.
 func TestAttachmentPartsRequiresMIMETypeForInlineData(t *testing.T) {
 	_, err := attachmentParts("prompt", []Attachment{{Data: []byte("bytes")}})
 
@@ -92,13 +92,13 @@ func TestAttachmentPartsRequiresMIMETypeForInlineData(t *testing.T) {
 		t.Fatalf("attachmentParts() error = %v, want ErrInvalidAttachment", err)
 	}
 	if errors.Is(err, ErrEmptyParts) {
-		t.Error("MIME type の欠落が ErrEmptyParts に分類されています")
+		t.Error("a missing MIME type is classified as ErrEmptyParts")
 	}
 }
 
-// TestAttachmentPartsBuildsFileDataForURIs は、URI 参照がインラインではなく FileData の
-// パートになることを検証します。Vertex AI は gs:// をそのまま読めるため、参照で渡す
-// 経路をバイト列と同じ型で表せる必要があります。
+// TestAttachmentPartsBuildsFileDataForURIs checks that a URI reference becomes a FileData
+// part rather than inline data. Vertex AI can read gs:// directly, so the path that passes a
+// reference must be expressible with the same type as bytes.
 func TestAttachmentPartsBuildsFileDataForURIs(t *testing.T) {
 	parts, err := attachmentParts("describe", []Attachment{
 		{URI: "gs://bucket/cover.png", MIMEType: "image/png"},
@@ -112,25 +112,25 @@ func TestAttachmentPartsBuildsFileDataForURIs(t *testing.T) {
 	}
 
 	if parts[1].FileData == nil || parts[1].FileData.FileURI != "gs://bucket/cover.png" {
-		t.Errorf("parts[1] = %+v, want gs:// 参照", parts[1])
+		t.Errorf("parts[1] = %+v, want a gs:// reference", parts[1])
 	}
 	if parts[1].FileData.MIMEType != "image/png" {
-		t.Errorf("parts[1] の MIME type = %q, want そのまま渡ること", parts[1].FileData.MIMEType)
+		t.Errorf("parts[1] MIME type = %q, want it passed through as is", parts[1].FileData.MIMEType)
 	}
-	// MIME type を推測できない URI は、サーバー側の判定に委ねられるよう空のまま送る。
+	// A URI whose MIME type cannot be guessed is sent with it empty, leaving the decision to the server.
 	if parts[2].FileData == nil || parts[2].FileData.MIMEType != "" {
-		t.Errorf("parts[2] = %+v, want MIME type は空のまま", parts[2])
+		t.Errorf("parts[2] = %+v, want the MIME type left empty", parts[2])
 	}
 	if parts[1].InlineData != nil || parts[2].InlineData != nil {
-		t.Error("URI 参照がインラインデータとして送られています")
+		t.Error("a URI reference was sent as inline data")
 	}
 }
 
-// TestAttachmentValidateSourceClassifiesByCallerSentinel は、同じ「Data と URI の併用」が
-// 呼び出し経路ごとに違うセンチネルへ分類されることを検証します。
+// TestAttachmentValidateSourceClassifiesByCallerSentinel checks that the same "Data together
+// with URI" is classified into a different sentinel per call path.
 //
-// 定義は 1 か所（validateSource）ですが、生成の入力なら ErrInvalidAttachment、
-// 動画生成の入力なら ErrInvalidVideoInput として下流の errors.Is が働く必要があります。
+// The definition is in one place (validateSource), but downstream errors.Is must work as
+// ErrInvalidAttachment for generation input and as ErrInvalidVideoInput for video generation input.
 func TestAttachmentValidateSourceClassifiesByCallerSentinel(t *testing.T) {
 	both := Attachment{MIMEType: "image/png", Data: []byte("bytes"), URI: "gs://bucket/cover.png"}
 
@@ -139,8 +139,8 @@ func TestAttachmentValidateSourceClassifiesByCallerSentinel(t *testing.T) {
 		sentinel error
 		other    error
 	}{
-		{"生成の入力", ErrInvalidAttachment, ErrInvalidVideoInput},
-		{"動画生成の入力", ErrInvalidVideoInput, ErrInvalidAttachment},
+		{"generation input", ErrInvalidAttachment, ErrInvalidVideoInput},
+		{"video generation input", ErrInvalidVideoInput, ErrInvalidAttachment},
 	}
 
 	for _, tt := range tests {
@@ -150,15 +150,15 @@ func TestAttachmentValidateSourceClassifiesByCallerSentinel(t *testing.T) {
 				t.Fatalf("validateSource() error = %v, want %v", err, tt.sentinel)
 			}
 			if errors.Is(err, tt.other) {
-				t.Errorf("validateSource() error = %v, want %v に分類されないこと", err, tt.other)
+				t.Errorf("validateSource() error = %v, want it not classified as %v", err, tt.other)
 			}
 			if !strings.Contains(err.Error(), "Image") {
-				t.Errorf("error = %q, want どの入力が不正かを含むこと", err)
+				t.Errorf("error = %q, want it to name which input was invalid", err)
 			}
 		})
 	}
 
-	t.Run("片方だけならエラーにしない", func(t *testing.T) {
+	t.Run("no error when only one is set", func(t *testing.T) {
 		for _, a := range []Attachment{
 			{MIMEType: "image/png", Data: []byte("bytes")},
 			{URI: "gs://bucket/cover.png"},
@@ -171,8 +171,8 @@ func TestAttachmentValidateSourceClassifiesByCallerSentinel(t *testing.T) {
 	})
 }
 
-// TestAttachmentPartsRejectsDataAndURITogether は、併用が送信前に弾かれることを
-// 検証します。両方送るとどちらが効くかは API 任せになります。
+// TestAttachmentPartsRejectsDataAndURITogether checks that setting both is refused before
+// sending. Sending both would leave it to the API which one takes effect.
 func TestAttachmentPartsRejectsDataAndURITogether(t *testing.T) {
 	_, err := attachmentParts("prompt", []Attachment{
 		{MIMEType: "image/png", Data: []byte("bytes"), URI: "gs://bucket/cover.png"},
@@ -183,17 +183,17 @@ func TestAttachmentPartsRejectsDataAndURITogether(t *testing.T) {
 	}
 }
 
-// TestAttachmentIsEmptyCoversBothCarriers は、URI だけの添付を「空」と見なさないことを
-// 検証します。空扱いすると参照ベースの画像が黙って全部落ちます。
+// TestAttachmentIsEmptyCoversBothCarriers checks that a URI-only attachment is not treated
+// as "empty". Treating it as empty would silently drop every reference-based image.
 func TestAttachmentIsEmptyCoversBothCarriers(t *testing.T) {
 	tests := map[string]struct {
 		attachment Attachment
 		want       bool
 	}{
-		"何も無い":          {attachment: Attachment{MIMEType: "image/png"}, want: true},
-		"Data あり":       {attachment: Attachment{Data: []byte("x")}, want: false},
-		"URI あり":        {attachment: Attachment{URI: "gs://bucket/a.png"}, want: false},
-		"MIME type も無い": {attachment: Attachment{}, want: true},
+		"nothing":             {attachment: Attachment{MIMEType: "image/png"}, want: true},
+		"with Data":           {attachment: Attachment{Data: []byte("x")}, want: false},
+		"with URI":            {attachment: Attachment{URI: "gs://bucket/a.png"}, want: false},
+		"no MIME type either": {attachment: Attachment{}, want: true},
 	}
 
 	for name, tt := range tests {

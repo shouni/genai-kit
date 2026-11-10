@@ -5,29 +5,29 @@ import (
 	"strings"
 )
 
-// センチネルエラー。呼び出し側は errors.Is で判定し、リトライやプロンプトの
-// 見直しなど失敗の種類に応じた制御を選べます。
+// Sentinel errors. Callers classify them with errors.Is and can choose a response
+// suited to the kind of failure, such as retrying or revising the prompt.
 var (
-	// ErrWorkflowConfig は、New に必要な依存やモデル名が欠けている場合に返されます。
+	// ErrWorkflowConfig is returned when a dependency or model name required by New is missing.
 	ErrWorkflowConfig = errors.New("lyria: workflow configuration is incomplete")
-	// ErrNilInput は、生成に必要な入力（収集コンテンツ・歌詞・レシピ）が nil の場合に返されます。
+	// ErrNilInput is returned when an input required for generation (collected content, lyrics, recipe) is nil.
 	ErrNilInput = errors.New("lyria: required input is nil")
-	// ErrEmptyLyrics は、生成された歌詞ドラフトの本文が空だった場合に返されます。
-	// プロンプトを変えずに再試行しても解決しない可能性が高い失敗です。
+	// ErrEmptyLyrics is returned when the body of a generated lyrics draft is empty.
+	// It is a failure that retrying without changing the prompt is unlikely to fix.
 	ErrEmptyLyrics = errors.New("lyria: lyrics draft is empty")
-	// ErrNoAudio は、Lyria の呼び出しは成功したのに音声データが返らなかった場合に返されます。
+	// ErrNoAudio is returned when the Lyria call succeeded but no audio data came back.
 	ErrNoAudio = errors.New("lyria: no audio data received")
-	// ErrInvalidResponse は、モデル出力が期待する JSON として解釈できなかった場合に
-	// 返されます。再生成（リトライ）で解決することがあります。
+	// ErrInvalidResponse is returned when the model output cannot be interpreted as the
+	// expected JSON. Regenerating (retrying) may fix it.
 	ErrInvalidResponse = errors.New("lyria: model response is not valid")
 )
 
-// maxErrorPayload は、エラーメッセージへ埋め込むモデル生出力の上限バイト数です。
-// レシピ JSON は数 KB になるため、全文を埋め込むとログ1行が肥大化します。
+// maxErrorPayload is the maximum number of bytes of raw model output embedded in an error message.
+// A recipe JSON runs to several KB, so embedding all of it bloats a single log line.
 const maxErrorPayload = 200
 
-// truncateForError は、エラーメッセージに埋め込む生テキストを上限まで切り詰めます。
-// UTF-8 の途中で切れた不完全なバイト列は取り除きます。
+// truncateForError truncates raw text embedded in an error message to the limit.
+// An incomplete byte sequence cut in the middle of UTF-8 is removed.
 func truncateForError(s string) string {
 	if len(s) <= maxErrorPayload {
 		return s

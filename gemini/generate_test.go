@@ -11,8 +11,8 @@ import (
 	"google.golang.org/genai"
 )
 
-// TestGenerateSendsPromptAndAttachments は、公開の入口が genai の型に触れずに
-// プロンプトと添付を SDK へ届けることを検証します。
+// TestGenerateSendsPromptAndAttachments checks that the public entry point delivers the prompt
+// and attachments to the SDK without touching genai types.
 func TestGenerateSendsPromptAndAttachments(t *testing.T) {
 	fake := &fakeModelClient{}
 	client := &Client{modelClient: fake}
@@ -30,7 +30,7 @@ func TestGenerateSendsPromptAndAttachments(t *testing.T) {
 		t.Errorf("model = %q", fake.gotModel)
 	}
 	if len(fake.gotContents) != 1 || fake.gotContents[0].Role != "user" {
-		t.Fatalf("contents = %+v, want user ロール 1 件", fake.gotContents)
+		t.Fatalf("contents = %+v, want one user-role entry", fake.gotContents)
 	}
 	parts := fake.gotContents[0].Parts
 	if len(parts) != 2 {
@@ -40,12 +40,12 @@ func TestGenerateSendsPromptAndAttachments(t *testing.T) {
 		t.Errorf("parts[0].Text = %q", parts[0].Text)
 	}
 	if parts[1].InlineData == nil || parts[1].InlineData.MIMEType != "audio/mpeg" {
-		t.Errorf("parts[1] = %+v, want 音声の添付", parts[1])
+		t.Errorf("parts[1] = %+v, want the audio attachment", parts[1])
 	}
 }
 
-// TestGenerateAppliesGenerateOptions は、GenerateOptions が公開の入口を通って
-// SDK へ届くことを検証します。構造化出力が genai を import せずに使える根拠です。
+// TestGenerateAppliesGenerateOptions checks that GenerateOptions reach the SDK through the public
+// entry point. This is what lets structured output be used without importing genai.
 func TestGenerateAppliesGenerateOptions(t *testing.T) {
 	fake := &fakeModelClient{}
 	client := &Client{modelClient: fake}
@@ -62,12 +62,12 @@ func TestGenerateAppliesGenerateOptions(t *testing.T) {
 		t.Errorf("ResponseMIMEType = %q", fake.gotConfig.ResponseMIMEType)
 	}
 	if fake.gotConfig.ResponseJsonSchema == nil {
-		t.Error("ResponseJsonSchema が渡っていません")
+		t.Error("ResponseJsonSchema was not passed")
 	}
 }
 
-// TestGenerateValidatesInput は、添付経由の入口が共通の検証を飛ばす抜け道に
-// ならないことを検証します。
+// TestGenerateValidatesInput checks that the attachment entry point does not become a loophole
+// that skips the shared validation.
 func TestGenerateValidatesInput(t *testing.T) {
 	client := &Client{modelClient: &fakeModelClient{}}
 
@@ -78,7 +78,7 @@ func TestGenerateValidatesInput(t *testing.T) {
 }
 
 func TestGenerateText(t *testing.T) {
-	t.Run("プロンプトだけを送ること", func(t *testing.T) {
+	t.Run("sends only the prompt", func(t *testing.T) {
 		fake := &fakeModelClient{}
 		client := &Client{modelClient: fake}
 
@@ -87,11 +87,11 @@ func TestGenerateText(t *testing.T) {
 		}
 		parts := fake.gotContents[0].Parts
 		if len(parts) != 1 || parts[0].Text != "hello" {
-			t.Errorf("parts = %+v, want テキスト 1 件", parts)
+			t.Errorf("parts = %+v, want one text part", parts)
 		}
 	})
 
-	t.Run("空のプロンプトは ErrEmptyPrompt", func(t *testing.T) {
+	t.Run("an empty prompt is ErrEmptyPrompt", func(t *testing.T) {
 		client := &Client{modelClient: &fakeModelClient{}}
 
 		if _, err := client.GenerateText(context.Background(), "gemini-test", ""); !errors.Is(err, ErrEmptyPrompt) {
@@ -107,10 +107,10 @@ func TestValidateGenerateInput(t *testing.T) {
 		parts []*genai.Part
 		want  error
 	}{
-		{"モデル名が空", "", []*genai.Part{{Text: "hello"}}, ErrEmptyModelName},
-		{"パーツが空", "gemini-test", nil, ErrEmptyParts},
-		{"nil パーツを含む", "gemini-test", []*genai.Part{nil}, ErrInvalidPart},
-		{"正常系", "gemini-test", []*genai.Part{{Text: "hello"}}, nil},
+		{"empty model name", "", []*genai.Part{{Text: "hello"}}, ErrEmptyModelName},
+		{"empty parts", "gemini-test", nil, ErrEmptyParts},
+		{"contains a nil part", "gemini-test", []*genai.Part{nil}, ErrInvalidPart},
+		{"valid", "gemini-test", []*genai.Part{{Text: "hello"}}, nil},
 	}
 
 	for _, tt := range tests {
@@ -129,21 +129,21 @@ func TestValidateGenerateInput(t *testing.T) {
 	}
 }
 
-// TestGenerateWrapsAPIError は、SDK からの失敗にモデル名の文脈が付くことを
-// 検証します。原因は %w で辿れます。
+// TestGenerateWrapsAPIError checks that a failure from the SDK gets the model name as context.
+// The cause can be reached through %w.
 func TestGenerateWrapsAPIError(t *testing.T) {
 	sentinel := errors.New("quota exceeded")
 	client := &Client{modelClient: &fakeModelClient{err: sentinel}}
 
 	_, err := client.Generate(context.Background(), "gemini-test", "prompt", nil, GenerateOptions{})
 	if !errors.Is(err, sentinel) {
-		t.Fatalf("Generate() error = %v, want 原因が辿れること", err)
+		t.Fatalf("Generate() error = %v, want the cause to be reachable", err)
 	}
 }
 
-// TestGenerateRequestTimeoutBoundsCall は、RequestTimeout が実行中の 1 回にも
-// 掛かることを検証します。上限時間の経過はバブル内の仮想時計で進むため、
-// 実運用に近い値のまま実時間を消費しません。
+// TestGenerateRequestTimeoutBoundsCall checks that RequestTimeout also applies to the in-flight
+// call. The time limit elapses on the bubble's virtual clock, so values close to production
+// consume no real time.
 func TestGenerateRequestTimeoutBoundsCall(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		client := &Client{
@@ -153,7 +153,7 @@ func TestGenerateRequestTimeoutBoundsCall(t *testing.T) {
 
 		_, err := client.Generate(context.Background(), "gemini-test", "hello", nil, GenerateOptions{})
 		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("RequestTimeout が効いていません: err = %v", err)
+			t.Fatalf("RequestTimeout is not applied: err = %v", err)
 		}
 	})
 }
@@ -178,7 +178,7 @@ func TestBuildGenerateConfigAppliesOptions(t *testing.T) {
 	}
 	if got.SystemInstruction == nil || len(got.SystemInstruction.Parts) != 1 ||
 		got.SystemInstruction.Parts[0].Text != "system" {
-		t.Fatalf("SystemInstruction が適用されていません: %+v", got.SystemInstruction)
+		t.Fatalf("SystemInstruction is not applied: %+v", got.SystemInstruction)
 	}
 	if got.ResponseMIMEType != "application/json" {
 		t.Fatalf("ResponseMIMEType = %q, want application/json", got.ResponseMIMEType)
@@ -186,12 +186,12 @@ func TestBuildGenerateConfigAppliesOptions(t *testing.T) {
 	if got.ImageConfig == nil || got.ImageConfig.AspectRatio != "16:9" ||
 		got.ImageConfig.ImageSize != "1K" ||
 		got.ImageConfig.PersonGeneration != string(PersonGenerationAllowAll) {
-		t.Fatalf("ImageConfig が適用されていません: %+v", got.ImageConfig)
+		t.Fatalf("ImageConfig is not applied: %+v", got.ImageConfig)
 	}
 }
 
 func TestBuildGenerateConfigOutputURIPrefix(t *testing.T) {
-	t.Run("未指定なら送らない", func(t *testing.T) {
+	t.Run("not sent when unspecified", func(t *testing.T) {
 		got, err := buildGenerateConfig(GenerateOptions{})
 		if err != nil {
 			t.Fatalf("buildGenerateConfig() error = %v", err)
@@ -201,7 +201,7 @@ func TestBuildGenerateConfigOutputURIPrefix(t *testing.T) {
 		}
 	})
 
-	t.Run("gs:// は書き込み先として送る", func(t *testing.T) {
+	t.Run("gs:// is sent as the destination", func(t *testing.T) {
 		got, err := buildGenerateConfig(GenerateOptions{OutputURIPrefix: "gs://bucket/prefix/"})
 		if err != nil {
 			t.Fatalf("buildGenerateConfig() error = %v", err)
@@ -212,7 +212,7 @@ func TestBuildGenerateConfigOutputURIPrefix(t *testing.T) {
 	})
 
 	for _, prefix := range []string{"https://example.com/out/", "bucket/prefix/"} {
-		t.Run("gs:// 以外は送る前に弾く: "+prefix, func(t *testing.T) {
+		t.Run("anything other than gs:// is refused before sending: "+prefix, func(t *testing.T) {
 			_, err := buildGenerateConfig(GenerateOptions{OutputURIPrefix: prefix})
 			if !errors.Is(err, ErrInvalidOutputURIPrefix) {
 				t.Errorf("err = %v, want ErrInvalidOutputURIPrefix", err)
@@ -221,17 +221,17 @@ func TestBuildGenerateConfigOutputURIPrefix(t *testing.T) {
 	}
 }
 
-// TestGenerateReadsFileDataOnlyWithOutputURIPrefix は、FileData の URI を返すのが
-// OutputURIPrefix を指定した呼び出しだけであることを、Generate 経由で検証します。
-// 未指定の呼び出しの結果は、この機能が入る前と同じでなければなりません。
+// TestGenerateReadsFileDataOnlyWithOutputURIPrefix checks, through Generate, that FileData URIs
+// are returned only for calls that specified OutputURIPrefix. The result of calls without it
+// must be the same as before this feature was added.
 func TestGenerateReadsFileDataOnlyWithOutputURIPrefix(t *testing.T) {
 	tests := []struct {
 		name string
 		opts GenerateOptions
 		want int
 	}{
-		{"未指定なら拾わない", GenerateOptions{}, 0},
-		{"指定すれば拾う", GenerateOptions{OutputURIPrefix: "gs://bucket/out/"}, 1},
+		{"not picked up when unspecified", GenerateOptions{}, 0},
+		{"picked up when specified", GenerateOptions{OutputURIPrefix: "gs://bucket/out/"}, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -245,14 +245,14 @@ func TestGenerateReadsFileDataOnlyWithOutputURIPrefix(t *testing.T) {
 				t.Fatalf("Generate() error = %v", err)
 			}
 			if len(resp.Attachments) != tt.want {
-				t.Errorf("Attachments = %+v, want %d 件", resp.Attachments, tt.want)
+				t.Errorf("Attachments = %+v, want %d entries", resp.Attachments, tt.want)
 			}
 		})
 	}
 }
 
-// TestBuildGenerateConfigSamplingParams は、ゼロ値が意味を持つ項目をポインタで
-// 区別できていることを検証します。Temperature 0 は「未設定」ではなく「決定的」です。
+// TestBuildGenerateConfigSamplingParams checks that fields whose zero value is meaningful are
+// distinguished with pointers. Temperature 0 means "deterministic", not "unset".
 func TestBuildGenerateConfigSamplingParams(t *testing.T) {
 	got, err := buildGenerateConfig(GenerateOptions{
 		Temperature:     new(float32(0)),
@@ -282,8 +282,8 @@ func TestBuildGenerateConfigSamplingParams(t *testing.T) {
 	}
 }
 
-// TestBuildGenerateConfigRejectsOutOfRangeSeed は、int32 に収まらないシードを
-// 送信前に弾くことを検証します。
+// TestBuildGenerateConfigRejectsOutOfRangeSeed checks that a seed that does not fit in int32
+// is refused before sending.
 func TestBuildGenerateConfigRejectsOutOfRangeSeed(t *testing.T) {
 	seed := int64(math.MaxInt32) + 1
 
@@ -296,7 +296,7 @@ func TestApplyResponseFormat(t *testing.T) {
 	schema := &Schema{Type: TypeObject}
 	jsonSchema := map[string]any{"type": "object"}
 
-	t.Run("audio/* はモダリティを AUDIO にする", func(t *testing.T) {
+	t.Run("audio/* sets the modality to AUDIO", func(t *testing.T) {
 		got := &genai.GenerateContentConfig{}
 		applyResponseFormat(got, GenerateOptions{ResponseMIMEType: "audio/wav"})
 
@@ -308,7 +308,7 @@ func TestApplyResponseFormat(t *testing.T) {
 		}
 	})
 
-	t.Run("image/* はモダリティを IMAGE にする", func(t *testing.T) {
+	t.Run("image/* sets the modality to IMAGE", func(t *testing.T) {
 		got := &genai.GenerateContentConfig{}
 		applyResponseFormat(got, GenerateOptions{ResponseMIMEType: "image/png"})
 
@@ -317,41 +317,41 @@ func TestApplyResponseFormat(t *testing.T) {
 		}
 	})
 
-	t.Run("application/json はモダリティを触らない", func(t *testing.T) {
+	t.Run("application/json leaves the modality alone", func(t *testing.T) {
 		got := &genai.GenerateContentConfig{}
 		applyResponseFormat(got, GenerateOptions{ResponseMIMEType: "application/json"})
 
 		if len(got.ResponseModalities) != 0 {
-			t.Errorf("ResponseModalities = %v, want 空", got.ResponseModalities)
+			t.Errorf("ResponseModalities = %v, want empty", got.ResponseModalities)
 		}
 	})
 
-	t.Run("ResponseSchema のみ", func(t *testing.T) {
+	t.Run("ResponseSchema only", func(t *testing.T) {
 		got := &genai.GenerateContentConfig{}
 		applyResponseFormat(got, GenerateOptions{ResponseSchema: schema})
 
 		if got.ResponseSchema == nil || got.ResponseJsonSchema != nil {
-			t.Errorf("ResponseSchema だけが送られるべきです: schema=%v json=%v",
+			t.Errorf("only ResponseSchema should be sent: schema=%v json=%v",
 				got.ResponseSchema, got.ResponseJsonSchema)
 		}
 	})
 
-	// 両方送るとどちらが効くか不定になるため、片方だけを送ります。
-	t.Run("両方指定なら ResponseJSONSchema を優先すること", func(t *testing.T) {
+	// Sending both leaves it undefined which one takes effect, so only one is sent.
+	t.Run("prefers ResponseJSONSchema when both are specified", func(t *testing.T) {
 		got := &genai.GenerateContentConfig{}
 		applyResponseFormat(got, GenerateOptions{ResponseSchema: schema, ResponseJSONSchema: jsonSchema})
 
 		if got.ResponseJsonSchema == nil {
-			t.Error("ResponseJsonSchema が送られていません")
+			t.Error("ResponseJsonSchema was not sent")
 		}
 		if got.ResponseSchema != nil {
-			t.Error("ResponseSchema も送られています。片方だけにすべきです")
+			t.Error("ResponseSchema was sent too; only one should be")
 		}
 	})
 }
 
 func TestApplyImageConfig(t *testing.T) {
-	t.Run("画像パラメータが無ければ ImageConfig を作らない", func(t *testing.T) {
+	t.Run("does not create ImageConfig without image parameters", func(t *testing.T) {
 		got := &genai.GenerateContentConfig{}
 		applyImageConfig(got, GenerateOptions{SystemPrompt: "x"})
 
@@ -360,7 +360,7 @@ func TestApplyImageConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("モダリティが未設定なら IMAGE を補うこと", func(t *testing.T) {
+	t.Run("fills in IMAGE when the modality is unset", func(t *testing.T) {
 		got := &genai.GenerateContentConfig{}
 		applyImageConfig(got, GenerateOptions{AspectRatio: "16:9"})
 
@@ -369,12 +369,12 @@ func TestApplyImageConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("既に設定されたモダリティは上書きしないこと", func(t *testing.T) {
+	t.Run("does not overwrite an already set modality", func(t *testing.T) {
 		got := &genai.GenerateContentConfig{ResponseModalities: []string{"AUDIO"}}
 		applyImageConfig(got, GenerateOptions{AspectRatio: "16:9"})
 
 		if len(got.ResponseModalities) != 1 || got.ResponseModalities[0] != "AUDIO" {
-			t.Errorf("ResponseModalities = %v, want [AUDIO] のまま", got.ResponseModalities)
+			t.Errorf("ResponseModalities = %v, want it to stay [AUDIO]", got.ResponseModalities)
 		}
 	})
 }
@@ -388,32 +388,32 @@ func TestBuildThinkingConfig(t *testing.T) {
 		wantBudget *int32
 	}{
 		{
-			name:    "未指定なら nil（モデル既定の思考挙動を上書きしない）",
+			name:    "nil when unspecified (does not override the model's default thinking behaviour)",
 			opts:    GenerateOptions{},
 			wantNil: true,
 		},
 		{
-			name:       "ThinkingBudget のみ",
+			name:       "ThinkingBudget only",
 			opts:       GenerateOptions{ThinkingBudget: new(int32(0))},
 			wantBudget: new(int32(0)),
 		},
 		{
-			name:      "ThinkingLevel のみ",
+			name:      "ThinkingLevel only",
 			opts:      GenerateOptions{ThinkingLevel: ThinkingLow},
 			wantLevel: ThinkingLow,
 		},
 		{
-			name:      "両方指定なら ThinkingLevel を優先し Budget は送らない",
+			name:      "prefers ThinkingLevel when both are set and does not send Budget",
 			opts:      GenerateOptions{ThinkingLevel: ThinkingHigh, ThinkingBudget: new(int32(4096))},
 			wantLevel: ThinkingHigh,
 		},
 		{
-			name:       "Unspecified は未指定扱い",
+			name:       "Unspecified counts as unspecified",
 			opts:       GenerateOptions{ThinkingLevel: ThinkingUnspecified, ThinkingBudget: new(int32(128))},
 			wantBudget: new(int32(128)),
 		},
 		{
-			name: "IncludeThoughts だけでも設定を送る",
+			name: "sends the config for IncludeThoughts alone",
 			opts: GenerateOptions{IncludeThoughts: true},
 		},
 	}
@@ -454,14 +454,14 @@ func TestSeedToPtrInt32(t *testing.T) {
 	over := int64(math.MaxInt32) + 1
 	under := int64(math.MinInt32) - 1
 
-	t.Run("nil なら nil", func(t *testing.T) {
+	t.Run("nil gives nil", func(t *testing.T) {
 		got, err := seedToPtrInt32(nil)
 		if err != nil || got != nil {
 			t.Errorf("seedToPtrInt32(nil) = %v, %v, want nil, nil", got, err)
 		}
 	})
 
-	t.Run("範囲内はそのまま変換すること", func(t *testing.T) {
+	t.Run("converts in-range values as is", func(t *testing.T) {
 		got, err := seedToPtrInt32(&valid)
 		if err != nil {
 			t.Fatalf("seedToPtrInt32() error = %v", err)
@@ -471,8 +471,8 @@ func TestSeedToPtrInt32(t *testing.T) {
 		}
 	})
 
-	for name, seed := range map[string]*int64{"上限超え": &over, "下限割れ": &under} {
-		t.Run(name+"は ErrInvalidSeed", func(t *testing.T) {
+	for name, seed := range map[string]*int64{"above the maximum": &over, "below the minimum": &under} {
+		t.Run(name+" is ErrInvalidSeed", func(t *testing.T) {
 			if _, err := seedToPtrInt32(seed); !errors.Is(err, ErrInvalidSeed) {
 				t.Errorf("seedToPtrInt32() error = %v, want ErrInvalidSeed", err)
 			}

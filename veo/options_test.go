@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// TestOptionsIgnoreInvalidValues は、不正な値（ゼロ以下・nil）を「指定なし」として
-// 無視し、既定値を保つことを検証します。呼び出し側が設定値を組み立てるとき、
-// 未設定のゼロ値がそのまま「間隔 0 の暴走」にならないための決まりです。
+// TestOptionsIgnoreInvalidValues checks that invalid values (zero or below, nil) are
+// ignored as "not specified" and the defaults are kept. This rule keeps an unset zero
+// value in a caller's assembled settings from turning into "a runaway loop with interval 0".
 func TestOptionsIgnoreInvalidValues(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -19,17 +19,17 @@ func TestOptionsIgnoreInvalidValues(t *testing.T) {
 		want Client
 	}{
 		{
-			name: "未指定なら既定値のまま",
+			name: "keeps the default when unspecified",
 			opts: nil,
 			want: Client{pollInterval: DefaultPollInterval, pollTimeout: DefaultPollTimeout, maxPollErrors: DefaultMaxPollErrors},
 		},
 		{
-			name: "指定した値が反映されること",
+			name: "applies the specified value",
 			opts: []Option{WithPollInterval(3 * time.Second), WithPollTimeout(time.Minute), WithMaxPollErrors(5)},
 			want: Client{pollInterval: 3 * time.Second, pollTimeout: time.Minute, maxPollErrors: 5},
 		},
 		{
-			name: "ゼロ以下は無視して既定値を保つこと",
+			name: "ignores zero or below and keeps the default",
 			opts: []Option{WithPollInterval(0), WithPollTimeout(-time.Second), WithMaxPollErrors(0)},
 			want: Client{pollInterval: DefaultPollInterval, pollTimeout: DefaultPollTimeout, maxPollErrors: DefaultMaxPollErrors},
 		},
@@ -54,8 +54,8 @@ func TestOptionsIgnoreInvalidValues(t *testing.T) {
 	}
 }
 
-// TestWithLoggerIgnoresNil は、nil のロガーで既定のロガーを消さないことを検証します。
-// 消えると、ポーリングの警告ログが出ないうえ nil 参照で落ちます。
+// TestWithLoggerIgnoresNil checks that a nil logger does not erase the default logger.
+// If it did, the polling warning logs would disappear and a nil dereference would crash.
 func TestWithLoggerIgnoresNil(t *testing.T) {
 	client, err := New(&fakeGenerator{}, WithLogger(nil))
 	if err != nil {

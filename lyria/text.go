@@ -9,28 +9,28 @@ import (
 	"github.com/shouni/genai-kit/gemini"
 )
 
-// LyricsGenerator は歌詞生成を担う役割です。
+// LyricsGenerator is the role responsible for generating lyrics.
 type LyricsGenerator interface {
 	GenerateLyrics(ctx context.Context, ai AIModels, input *CollectedContent) (*LyricsDraft, error)
 }
 
-// Composer は楽曲の設計（レシピ構築）を担う役割です。
+// Composer is the role responsible for designing the song (building the recipe).
 type Composer interface {
 	Compose(ctx context.Context, ai AIModels, lyrics *LyricsDraft) (*MusicRecipe, error)
 }
 
-// TextPromptBuilder は歌詞およびレシピ生成のためのプロンプトを構築するインターフェースです。
+// TextPromptBuilder is the interface that builds prompts for lyrics and recipe generation.
 //
-// メソッドは歌詞やレシピそのものではなくプロンプト文字列を返します。名前が
-// Generate で始まると LyricsGenerator.GenerateLyrics（歌詞を生成する側）と紛れる
-// ため、「何のプロンプトか」を名詞で示します。このパッケージで Generator は
-// AI を呼ぶ側を、Builder は AI を呼ばない組み立て役を指します。
+// The methods return prompt strings, not lyrics or recipes. A name starting with Generate
+// would be confused with LyricsGenerator.GenerateLyrics (the side that generates lyrics), so
+// the names say with a noun "which prompt it is". In this package, a Generator is the side
+// that calls the AI, and a Builder is an assembler that does not.
 type TextPromptBuilder interface {
 	LyricsPrompt(mode string, input string) (string, error)
 	RecipePrompt(mode string, lyrics *LyricsDraft) (string, error)
 }
 
-// CollectedContent は、歌詞生成と楽曲生成の入力になるテキストと画像です。
+// CollectedContent is the text and images that serve as input to lyrics and song generation.
 type CollectedContent struct {
 	Prompt string
 	Images []ImagePayload
@@ -38,17 +38,17 @@ type CollectedContent struct {
 
 const defaultComposeMode = "default"
 
-// textGenerator は Gemini を使った歌詞生成と楽曲レシピ生成をまとめて扱います。
+// textGenerator handles both lyrics generation and song recipe generation with Gemini.
 type textGenerator struct {
 	aiClient     gemini.Generator
 	prompts      TextPromptBuilder
 	defaultModel string
-	// guard は nil で「制限なし・既定の上限時間」を意味します。
+	// A nil guard means "no limits, default time limit".
 	guard *callguard.Guard
 	group callguard.Group
 }
 
-// resolveModel は呼び出しごとのモデル指定があればそれを、なければデフォルトモデルを返します。
+// resolveModel returns the per-call model if one is specified, otherwise the default model.
 func (g *textGenerator) resolveModel(override string) string {
 	if override != "" {
 		return override
@@ -56,15 +56,15 @@ func (g *textGenerator) resolveModel(override string) string {
 	return g.defaultModel
 }
 
-// generateJSON は歌詞・レシピ生成で共通の「singleflight → Gemini 呼び出し → JSON デコード」
-// フローを実行します。kind はエラーメッセージと singleflight キーの識別子です。
-// 戻り値は singleflight で共有されるため、呼び出し側で複製してから返してください。
+// generateJSON runs the "singleflight → Gemini call → JSON decode" flow shared by lyrics and
+// recipe generation. kind identifies the call in error messages and the singleflight key.
+// The return value is shared through singleflight, so callers must copy it before returning it.
 //
-// Go 1.27 でメソッドが型パラメータを持てるようになったため、レシーバを第 2 引数で
-// 受け取る関数ではなくメソッドとして書けます。
+// Since Go 1.27 methods can have type parameters, so this can be written as a method rather
+// than a function taking the receiver as its second argument.
 func (g *textGenerator) generateJSON[T any](ctx context.Context, kind, model, prompt string, seed *int64, schema *gemini.Schema) (*T, error) {
-	// seed は生成結果を変えるため、必ずキーに含める。含め忘れると同一プロンプトで
-	// seed 違いの同時呼び出しが 1 回の生成結果を共有してしまう。
+	// seed changes the result, so it must always be part of the key. If it were left out, concurrent
+	// calls with the same prompt but different seeds would share the result of a single generation.
 	key := callguard.Key(kind, model, prompt, callguard.SeedKey(seed))
 	return callguard.Do(ctx, &g.group, g.guard, key, func(execCtx context.Context) (*T, error) {
 		resp, err := g.aiClient.Generate(execCtx, model, prompt, nil, jsonOptions(seed, schema))
@@ -75,8 +75,8 @@ func (g *textGenerator) generateJSON[T any](ctx context.Context, kind, model, pr
 			return nil, fmt.Errorf("%w: %s response is nil", ErrInvalidResponse, kind)
 		}
 
-		// 空判定・補修・デコード・抜粋は gemini.DecodeJSON が持つ。ここでは
-		// このパッケージの番兵（ErrInvalidResponse）を鎖に足すだけ。
+		// The empty check, repair, decode and excerpt belong to gemini.DecodeJSON. Here we only
+		// add this package's sentinel (ErrInvalidResponse) to the chain.
 		out, err := gemini.DecodeJSON[T](resp.Text)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s: %w", ErrInvalidResponse, kind, err)
@@ -85,7 +85,7 @@ func (g *textGenerator) generateJSON[T any](ctx context.Context, kind, model, pr
 	})
 }
 
-// GenerateLyrics は収集済みコンテンツから歌詞ドラフトを生成します。
+// GenerateLyrics generates a lyrics draft from collected content.
 func (g *textGenerator) GenerateLyrics(ctx context.Context, ai AIModels, input *CollectedContent) (*LyricsDraft, error) {
 	if input == nil {
 		return nil, fmt.Errorf("%w: collected content", ErrNilInput)
@@ -107,7 +107,7 @@ func (g *textGenerator) GenerateLyrics(ctx context.Context, ai AIModels, input *
 	return lyrics.Clone(), nil
 }
 
-// Compose は歌詞ドラフトから楽曲レシピを生成します。
+// Compose generates a song recipe from a lyrics draft.
 func (g *textGenerator) Compose(ctx context.Context, ai AIModels, lyrics *LyricsDraft) (*MusicRecipe, error) {
 	if lyrics == nil {
 		return nil, fmt.Errorf("%w: lyrics draft", ErrNilInput)
@@ -128,7 +128,7 @@ func (g *textGenerator) Compose(ctx context.Context, ai AIModels, lyrics *Lyrics
 		return nil, err
 	}
 
-	// 呼び出し元固有の情報は共有結果を複製してから付与する。
+	// Caller-specific information is added after copying the shared result.
 	recipe := shared.Clone()
 	recipe.Lyrics = lyrics.Clone()
 	recipe.AIModels = ai

@@ -8,103 +8,111 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Reference](https://pkg.go.dev/badge/github.com/shouni/genai-kit.svg)](https://pkg.go.dev/github.com/shouni/genai-kit)
 
-## 🚀 概要 (About) - genai SDK を公開 API に出さない Vertex AI 向けクライアント。保存も認証情報の配布も引き受けません
+English | [日本語](README.ja.md)
 
-**Gen Ai Kit** は、**Google Cloud Vertex AI** 向けの Go ライブラリです。テキスト生成、`gs://` を使った
-マルチモーダル入力、参照画像付きの画像生成、Lyria による音楽生成、Veo による動画生成を扱います。
-生成物の保存先は決めず、認証は Application Default Credentials に委ねます。
+## 🚀 About - a Vertex AI client that keeps the genai SDK out of its public API. It neither stores results nor hands out credentials
 
-**バックエンドは Vertex AI**（`Config.APIKey` だけは暫定の例外です。後述）、
-**参照画像の `gs://` はモデル側に直接解決させ**（取得もアップロードも起きません）、**画像生成の
-`imagegen` を内蔵**します。
+**Gen Ai Kit** is a Go library for **Google Cloud Vertex AI**. It covers text generation, multimodal
+input via `gs://`, image generation with reference images, music generation with Lyria, and video
+generation with Veo. It does not decide where results are stored, and it leaves authentication to
+Application Default Credentials.
 
-シグネチャ・フィールド・エラーの一覧は
-[pkg.go.dev](https://pkg.go.dev/github.com/shouni/genai-kit) にあります。ここに書くのは、
-godoc を読んでも気付けないことだけです。
+**The backend is Vertex AI** (`Config.APIKey` is the one temporary exception; see below),
+**`gs://` reference images are resolved by the model itself** (nothing is downloaded or uploaded), and
+**image generation (`imagegen`) is built in**.
 
----
-
-## ✨ 提供機能 (Features)
-
-* **`gemini`**: Vertex AI クライアント。生成の入口は `GenerateText`（テキストのみの最短経路）と
-  `Generate`（それ以外すべて）の 2 つだけです。
-  * **`genai.Part` を直接受け取る公開 API はありません。** 添付は `Attachment`（`MIMEType` と、
-    `Data` か `URI` の片方）で表します。SDK の型を公開面へ出すと、利用側が genai を import する
-    理由が復活してしまうためです。設定値の型と定数は別名として再エクスポートしてあるので、
-    値を選ぶためだけの import も要りません。
-  * **空の添付は黙って読み飛ばします。** 参照画像を「あれば渡す」形で組み立てる呼び出し側が、
-    空要素の除去を毎回書かずに済みます。プロンプトが空でも添付があれば送れます（音声だけを
-    渡して解析させる用途）。両方空なら `ErrEmptyParts` です。
-  * **`Config.HTTPClient` を渡しても認証は失われません。** genai は HTTP クライアントを渡されると
-    ADC の検出をスキップし、認証ヘッダ無しで送るため、素の `&http.Client{Timeout: ...}` だと
-    全リクエストが 401 `CREDENTIALS_MISSING` になります。本ライブラリが認証情報を付け直し、
-    渡したインスタンスは書き換えず複製を使います。
-  * **リトライは genai SDK に任せています。** 408 / 429 / 5xx と通信エラーの判定表を持たないので、
-    SDK が対象を増やせばそのまま追随します。`Config` で回数と間隔を渡すだけです。
-  * **構造化出力の本文は `DecodeJSON[T]` でデコードしてください。** `ResponseSchema` を指定しても、
-    モデルは完結した JSON の後ろに説明文を継ぎ足したり、複数行の本文の中に生の改行を入れたりします。
-    **どれも応答を返しきったあとの話なので、API の再試行では直りません。** `DecodeJSON` は
-    空判定・`CleanJSONResponse` による補修・デコード・エラー文への抜粋をまとめて行い、
-    失敗は `ErrEmptyResponse` / `ErrInvalidJSON` で返します。`json.Unmarshal` を直接呼ぶと、
-    補修を通し忘れた経路で数分かけた生成が丸ごと失われます。
-* **`imagegen`**: 参照画像付きの画像生成。プロンプト結合・シード採番・既定値・画像抽出を
-  引き受けます。参照画像は `gs://`（`Images`）と、呼び出し側が取得済みのバイト列（`References`）です。
-  **取得はこのパッケージの仕事ではありません** — HTTP の参照画像は、取得の経路・タイムアウト・
-  サイズ上限を呼び出し側が決めてバイト列で渡します。
-* **`music`**: 楽曲構成のデータ型（`Recipe` / `Section` / `LyricsDraft` / `AIModels`）。依存を持たない
-  葉パッケージで、レシピを読み書きするだけの下流サービスがワークフロー本体を輸入せずに済みます。
-  JSON タグは snake_case で、**保存済みレシピ JSON との互換性の契約**です。
-  どのサービスにも通じる語彙だけを持ち、生成先や歌詞の表記といった呼び出し側の方針は、
-  `Recipe` を埋め込んだ呼び出し側の型に置きます。
-* **`lyria`**: 歌詞生成 → 作曲レシピ生成 → Lyria 音声生成の 3 段。
-  * **プロンプト本文を一切持ちません。** 作詞・作曲は `TextPromptBuilder` を注入して決め、
-    音声は呼び出し側が組み立てたプロンプトを `GenerateAudio(ctx, lyria.AudioRequest{...})` で
-    受け取ります。このパッケージでは **`Generator` が AI を呼ぶ側、`Builder` が呼ばない
-    組み立て役**を指します。
-  * **一括実行の入口は意図的にありません。** 3 段を個別に呼ぶのは、段の間に構造検証などの
-    品質ゲートを挟めるようにするためです。
-  * `lyria.MusicRecipe` / `MusicSection` / `LyricsDraft` / `AIModels` は `music` の型の別名なので、
-    既存の表記もそのまま使えます。
-* **`veo`**: Veo 動画生成の投函と完了待ち。**「1 往復ずつ」を `gemini` が、「どう待つか」を `veo` が
-  持ちます。**
-  * `Submit`（投函だけ）と `Wait`（名前を渡して待ちを再開）に分けて呼べます。実行時間に上限のある
-    ジョブ基盤で、投函を済ませて一旦戻る使い方ができます。
-  * **投函にはリトライが効き、1 回ごとのポーリングには効きません。** ポーリングの中でさらに
-    バックオフを効かせると、設定した間隔とタイムアウトが意味を失うためです。一時的な失敗は
-    `WithMaxPollErrors` の回数まで受け流します。
-  * **入力系統は併用できません**（image / video / references）。API が確実に拒否する組み合わせは
-    送信前に `ErrInvalidVideoInput` で弾きます。
-* **`callguard`**: AI 呼び出しへの発射間隔・1 回あたりの上限時間・重複排除（singleflight）。
-  * **クォータはプロジェクト単位で、操作の種類ごとではありません。** テキスト生成と画像生成で
-    別々に絞っても意味がないため、ワークフロー全体で `Guard` を 1 つ共有し、重複排除の単位
-    （`Group`）だけを呼び出しの種類ごとに分けます。
-  * **戻り値は相乗りした全員で共有されます。** 呼び出し側が書き換える可能性があるものは
-    複製してから返してください。
-
-**genai SDK を import するのは `gemini` だけです。** 上位のパッケージはいずれも `gemini` の
-1〜2 メソッドのインターフェースだけを受け取るため、テストでは SDK も GCP 認証も要りません。
+Signatures, fields and the list of errors are on
+[pkg.go.dev](https://pkg.go.dev/github.com/shouni/genai-kit). This page only covers what you would
+not notice from reading the godoc.
 
 ---
 
-## 📦 パッケージ構成 (Package Structure)
+## ✨ Features
+
+* **`gemini`**: the Vertex AI client. There are only two entry points for generation: `GenerateText`
+  (the shortest path, text only) and `Generate` (everything else).
+  * **No public API takes a `genai.Part` directly.** Attachments are expressed as `Attachment`
+    (`MIMEType` plus exactly one of `Data` or `URI`). Exposing SDK types on the public surface would
+    bring back the reason for callers to import genai. Configuration value types and constants are
+    re-exported as aliases, so no import is needed just to pick a value either.
+  * **Empty attachments are silently skipped.** A caller that builds reference images as "pass it if
+    there is one" does not have to strip empty elements every time. A request can be sent with an
+    empty prompt as long as there is an attachment (for example, passing audio alone to have it
+    analysed). If both are empty, the result is `ErrEmptyParts`.
+  * **Passing `Config.HTTPClient` does not lose authentication.** When genai is given an HTTP client
+    it skips ADC detection and sends requests without an auth header, so a plain
+    `&http.Client{Timeout: ...}` makes every request fail with 401 `CREDENTIALS_MISSING`. This library
+    re-attaches the credentials, and works on a copy rather than modifying the instance you passed.
+  * **Retries are left to the genai SDK.** The library keeps no table of what counts as retryable
+    (408 / 429 / 5xx and transport errors), so when the SDK widens its criteria this library follows
+    automatically. `Config` only passes the attempt count and intervals.
+  * **Decode the body of a structured output with `DecodeJSON[T]`.** Even with `ResponseSchema` set,
+    the model appends an explanation after a complete JSON object, or puts raw newlines inside a
+    multi-line string. **All of this happens after the response has been returned in full, so an API
+    retry does not fix it.** `DecodeJSON` does the empty check, the repair via `CleanJSONResponse`, the
+    decode and the excerpt in the error message in one go, and reports failures as
+    `ErrEmptyResponse` / `ErrInvalidJSON`. Calling `json.Unmarshal` directly means that on a path that
+    forgot the repair, a generation that took minutes is lost entirely.
+* **`imagegen`**: image generation with reference images. It takes care of joining prompts, picking
+  seeds, defaults and extracting the image. Reference images are either `gs://` (`Images`) or bytes
+  the caller has already fetched (`References`). **Fetching is not this package's job** — for an HTTP
+  reference image, the caller decides the fetch path, timeout and size limit, and passes the bytes.
+* **`music`**: the data types for a song's structure (`Recipe` / `Section` / `LyricsDraft` /
+  `AIModels`). A dependency-free leaf package, so a downstream service that only reads and writes
+  recipes does not have to import the workflow itself. The JSON tags are snake_case and are **the
+  compatibility contract with stored recipe JSON**. It holds only vocabulary that applies to every
+  service; caller policy, such as the target model or how lyrics are written, belongs on the caller's
+  own type that embeds `Recipe`.
+* **`lyria`**: three stages — lyrics generation → composition recipe generation → Lyria audio
+  generation.
+  * **It holds no prompt text at all.** Lyrics and composition are decided by an injected
+    `TextPromptBuilder`, and for audio it receives a prompt assembled by the caller via
+    `GenerateAudio(ctx, lyria.AudioRequest{...})`. In this package, **a `Generator` is something that
+    calls the AI, and a `Builder` is an assembler that does not**.
+  * **There is deliberately no one-shot entry point.** The three stages are called separately so that
+    quality gates, such as structure validation, can sit between them.
+  * `lyria.MusicRecipe` / `MusicSection` / `LyricsDraft` / `AIModels` are aliases of the `music` types,
+    so existing spellings keep working.
+* **`veo`**: submitting Veo video generation and waiting for completion. **`gemini` owns "one round
+  trip at a time", and `veo` owns "how to wait".**
+  * It can be called as `Submit` (submit only) and `Wait` (resume waiting by passing the name). On a
+    job platform with a cap on execution time, you can submit and return for now.
+  * **Retries apply to the submission, not to each poll.** Adding backoff inside the polling as well
+    would make the configured interval and timeout meaningless. Transient failures are tolerated up to
+    `WithMaxPollErrors` times.
+  * **Input modes cannot be combined** (image / video / references). Combinations the API is certain
+    to reject are refused with `ErrInvalidVideoInput` before sending.
+* **`callguard`**: firing interval, per-call time limit and deduplication (singleflight) for AI calls.
+  * **Quota is per project, not per kind of operation.** Throttling text generation and image
+    generation separately achieves nothing, so the whole workflow shares one `Guard`, and only the
+    deduplication unit (`Group`) is split per kind of call.
+  * **Return values are shared by everyone who joined the call.** Copy anything the caller might
+    modify before returning it.
+
+**Only `gemini` imports the genai SDK.** Every higher-level package receives only a one- or
+two-method interface from `gemini`, so tests need neither the SDK nor GCP credentials.
+
+---
+
+## 📦 Package Structure
 
 ```text
 genai-kit/
-├── gemini/      # Vertex AI クライアント。生成・リトライ・レスポンス抽出と、Veo の 1 往復
-├── imagegen/    # gs:// 参照画像付きの画像生成（gemini.Generator を注入）
-├── music/       # 楽曲構成のデータ型。依存を持たない葉
-├── lyria/       # 歌詞 → レシピ → 音声の 3 段
-├── veo/         # Veo 動画生成の投函と完了待ち
-├── callguard/   # 発射間隔・上限時間・重複排除。依存を持たない葉
+├── gemini/      # Vertex AI client: generation, retries, response extraction, and Veo's single round trip
+├── imagegen/    # image generation with gs:// reference images (gemini.Generator is injected)
+├── music/       # data types for a song's structure; a dependency-free leaf
+├── lyria/       # three stages: lyrics → recipe → audio
+├── veo/         # submitting Veo video generation and waiting for completion
+├── callguard/   # firing interval, time limit and deduplication; a dependency-free leaf
 └── internal/
-    └── poll/    #   veo が使うポーリングの骨格
+    └── poll/    #   the polling skeleton used by veo
 ```
 
-インポートパスはいずれも `github.com/shouni/genai-kit/` を前置します。
+Every import path is prefixed with `github.com/shouni/genai-kit/`.
 
 ---
 
-## 🚦 使い方 (Usage)
+## 🚦 Usage
 
 ```sh
 go get github.com/shouni/genai-kit
@@ -132,7 +140,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	resp, err := client.GenerateText(ctx, "gemini-3.7-flash", "Goで短い俳句を書いて")
+	resp, err := client.GenerateText(ctx, "gemini-3.7-flash", "Write a short haiku about Go")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -141,36 +149,37 @@ func main() {
 }
 ```
 
-`ProjectID` と `LocationID` は両方必須です。認証は Application Default Credentials に従うため、
-Cloud Run などの環境では API キーをアプリケーションに持たせずに運用できます。ローカルでは
-`gcloud auth application-default login` で認証情報を用意してください。
+`ProjectID` and `LocationID` are both required. Authentication follows Application Default
+Credentials, so on environments such as Cloud Run the application can run without holding an API key.
+Locally, prepare credentials with `gcloud auth application-default login`.
 
-添付付きの生成・画像生成・音楽生成・動画生成の例は
-[pkg.go.dev](https://pkg.go.dev/github.com/shouni/genai-kit) にあります。
-**踏むと高くつく点も、それぞれの godoc に書いてあります** — 参照画像の URI が `gs://` のみで、HTTP 取得も
-File API 経由も持たないこと（`imagegen` パッケージ）、`NegativePrompt` の区切りが互換性の契約であること、
-安全フィルタと人物生成に既定値が補われること（`imagegen.Request`）、発射間隔も重複排除も持たないので
-`callguard` でデコレートしてテキスト生成と `Guard` を共有すること（`imagegen.Client`）。
-
----
-
-## ⚠️ `Config.APIKey` は暫定サポートです
-
-指定すると Gemini API バックエンドへ切り替わりますが、これは最新の Lyria が Vertex AI で提供されて
-おらず、音楽生成だけが API キー経路でしか動かないための例外です。Vertex AI で使えるようになった
-時点で削除します。**新しい用途でこれを選ばないでください** — 呼び出し側がどちらのバックエンドかを
-意識せずに済むことが、このライブラリの設計上の狙いだからです。
+Examples of generation with attachments, image generation, music generation and video generation are on
+[pkg.go.dev](https://pkg.go.dev/github.com/shouni/genai-kit).
+**The costly pitfalls are also written in each godoc** — reference image URIs are `gs://` only, with
+neither HTTP fetching nor the File API (the `imagegen` package); the `NegativePrompt` separator is a
+compatibility contract; defaults are filled in for safety filters and person generation
+(`imagegen.Request`); and since it has neither a firing interval nor deduplication, decorate it with
+`callguard` and share the `Guard` with text generation (`imagegen.Client`).
 
 ---
 
-## 🤝 依存関係 (Dependencies)
+## ⚠️ `Config.APIKey` is temporary
 
-- [google.golang.org/genai](https://pkg.go.dev/google.golang.org/genai) - Google 公式 SDK（Vertex AI バックエンドで使用）
-- [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) - `callguard` の singleflight
-- [golang.org/x/time](https://pkg.go.dev/golang.org/x/time) - `callguard` のレート制限
+Setting it switches to the Gemini API backend. This is an exception that exists because the latest
+Lyria is not offered on Vertex AI, so music generation alone only runs on the API key path. It will be
+removed once Lyria is available on Vertex AI. **Do not choose it for new uses** — the design goal of
+this library is that callers never have to know which backend they are on.
 
 ---
 
-## 📜 ライセンス (License)
+## 🤝 Dependencies
 
-このプロジェクトは [MIT License](https://opensource.org/licenses/MIT) の下で公開されています。
+- [google.golang.org/genai](https://pkg.go.dev/google.golang.org/genai) - Google's official SDK (used with the Vertex AI backend)
+- [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) - singleflight for `callguard`
+- [golang.org/x/time](https://pkg.go.dev/golang.org/x/time) - rate limiting for `callguard`
+
+---
+
+## 📜 License
+
+This project is released under the [MIT License](https://opensource.org/licenses/MIT).

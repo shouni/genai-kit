@@ -7,27 +7,27 @@ import (
 	"strings"
 )
 
-// ErrInvalidJSON は、モデルの応答本文を JSON として解釈できなかったことを示します。
-// 補修（CleanJSONResponse）を通しても直らなかった応答で、プロンプトを変えない限り
-// 同じ入力からは同じ壊れ方が返ります。
+// ErrInvalidJSON indicates that the model's response body could not be interpreted as JSON.
+// It is a response that the repair (CleanJSONResponse) could not fix, and unless the prompt
+// changes, the same input comes back broken the same way.
 var ErrInvalidJSON = errors.New("gemini: response is not valid JSON")
 
-// maxDecodeExcerpt は、デコード失敗のエラー文に載せる応答抜粋の上限バイト数です。
-// 全文はログを肥大化させるため、診断に足りる先頭だけを残します。
+// maxDecodeExcerpt is the maximum number of bytes of the response excerpt put in a decode-failure error.
+// The full text would bloat the logs, so only the beginning, which is enough for diagnosis, is kept.
 const maxDecodeExcerpt = 200
 
-// DecodeJSON は、モデルの応答本文（GenerateResponse.Text）を T にデコードします。
+// DecodeJSON decodes the model's response body (GenerateResponse.Text) into T.
 //
-// 構造化出力（ResponseMIMEType が application/json）でも、本文にはコードフェンスや
-// 前置きの文、文字列の中の壊れたエスケープが混ざります。デコードの前に必ず
-// CleanJSONResponse を通すのはそのためで、ここを手書きすると通し忘れた経路で
-// 数分かけた生成が「解釈できません」の一行だけを残して失われます。
+// Even with structured output (ResponseMIMEType application/json), the body contains code
+// fences, a preamble sentence, or broken escapes inside strings. That is why it always goes
+// through CleanJSONResponse before decoding; writing this by hand means that on a path that
+// forgot it, a generation that took minutes is lost, leaving only a one-line "cannot be parsed".
 //
-// 空の本文は ErrEmptyResponse、解釈できない本文は ErrInvalidJSON で返します。
-// どちらも errors.Is で判定できます。エラー文には元の応答の先頭を抜粋として載せます。
+// An empty body is returned as ErrEmptyResponse, and an unparsable body as ErrInvalidJSON.
+// Both can be classified with errors.Is. The error message carries the start of the original response as an excerpt.
 //
-// encoding/json（v1）でデコードします。v2 はメンバー名を大文字小文字まで区別するため、
-// モデルが "Title" と返した応答がエラーではなくゼロ値の構造体になります。
+// It decodes with encoding/json (v1). v2 matches member names case-sensitively, so a
+// response where the model returned "Title" would become a zero-value struct rather than an error.
 func DecodeJSON[T any](text string) (T, error) {
 	var out T
 
@@ -43,7 +43,7 @@ func DecodeJSON[T any](text string) (T, error) {
 	return out, nil
 }
 
-// decodeExcerpt は、エラー文に載せる応答の先頭を返します。途中で切った UTF-8 は落とします。
+// decodeExcerpt returns the start of the response for the error message. A UTF-8 sequence cut midway is dropped.
 func decodeExcerpt(s string) string {
 	if len(s) <= maxDecodeExcerpt {
 		return s

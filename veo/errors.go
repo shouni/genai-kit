@@ -2,22 +2,22 @@ package veo
 
 import "errors"
 
-// 入力・結果に関するセンチネルエラーです。呼び出し側は errors.Is で判定し、
-// 通信エラーとは異なる制御（プロンプトの見直しなど）を選べます。
+// Sentinel errors about input and results. Callers classify them with errors.Is and
+// can choose a response different from a transport error (such as revising the prompt).
 var (
-	// ErrGeneratorRequired は、New に nil の生成クライアントが渡された場合に返されます。
+	// ErrGeneratorRequired is returned when New is given a nil generation client.
 	ErrGeneratorRequired = errors.New("veo: video generator is required")
 
-	// ErrMissingOperationName は、完了待ちに必要なオペレーション名が無い場合に
-	// 返されます。未完了のオペレーションは必ず名前を持つため、通常は起こりません。
+	// ErrMissingOperationName is returned when the operation name needed to wait for
+	// completion is missing. An unfinished operation always has a name, so this should not normally happen.
 	ErrMissingOperationName = errors.New("veo: operation has no name to poll")
 
-	// ErrNoVideoGenerated は、オペレーションは成功で完了したのに動画が1本も
-	// 返らなかった場合に返されます。安全性ポリシーによる除外が典型例で、
-	// その場合は理由がエラーメッセージに含まれます。再試行では解決しません。
+	// ErrNoVideoGenerated is returned when the operation completed successfully but not a
+	// single video came back. Exclusion by a safety policy is the typical case, and the
+	// reason is then included in the error message. Retrying does not fix it.
 	ErrNoVideoGenerated = errors.New("veo: no video was generated")
 
-	// ErrPollFailed は、生成状況の確認が続けて失敗し、完了を待てなくなった場合に
-	// 返されます。最後に発生した原因が Unwrap で辿れます。
+	// ErrPollFailed is returned when checking the generation status fails repeatedly and
+	// completion can no longer be waited for. The last cause can be reached through Unwrap.
 	ErrPollFailed = errors.New("veo: polling for completion failed")
 )

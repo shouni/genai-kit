@@ -13,37 +13,37 @@ import (
 	"google.golang.org/genai/interactions/models/operations"
 )
 
-// newTestInteractions は、フェイクの Interactions クライアントを持つ InteractionsGenerator を返します。
+// newTestInteractions returns an InteractionsGenerator holding a fake Interactions client.
 func newTestInteractions(fake *fakeInteractionClient, cfg InteractionsConfig) *InteractionsGenerator {
 	client := &Client{interactionClient: fake, interactionRetries: Config{}.interactionRetryConfig()}
 	return client.Interactions(cfg)
 }
 
-// interactionFromJSON は API の返す JSON から Interaction を組み立てます。
-// 実際のレスポンスと同じ形（steps の model_output に内容ブロック）で検証するためです。
+// interactionFromJSON builds an Interaction from the JSON the API returns.
+// This tests in the same shape as a real response (content blocks in the steps' model_output).
 func interactionFromJSON(t *testing.T, raw string) *operations.CreateInteractionResponse {
 	t.Helper()
 	var it ia.Interaction
 	if err := json.Unmarshal([]byte(raw), &it); err != nil {
-		t.Fatalf("Interaction の JSON を読めません: %v", err)
+		t.Fatalf("cannot read the Interaction JSON: %v", err)
 	}
 	return &operations.CreateInteractionResponse{Interaction: &it}
 }
 
-// sentBody は、フェイクに送られたリクエスト本文を API へ送る JSON の形で返します。
+// sentBody returns the request body sent to the fake in the shape of the JSON sent to the API.
 func sentBody(t *testing.T, fake *fakeInteractionClient) map[string]any {
 	t.Helper()
 	body := fake.gotReq.Body.CreateModelInteraction
 	if body == nil {
-		t.Fatal("CreateModelInteraction が送られていません")
+		t.Fatal("CreateModelInteraction was not sent")
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
-		t.Fatalf("本文を JSON にできません: %v", err)
+		t.Fatalf("cannot turn the body into JSON: %v", err)
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("本文の JSON を読めません: %v", err)
+		t.Fatalf("cannot read the body JSON: %v", err)
 	}
 	return decoded
 }
@@ -76,16 +76,16 @@ func TestInteractionsGenerateBuildsAudioRequest(t *testing.T) {
 		SystemPrompt:   "sys",
 	})
 	if err != nil {
-		t.Fatalf("予期しないエラー: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	body := sentBody(t, fake)
 	if body["model"] != "lyria-3.5" {
 		t.Errorf("model = %v", body["model"])
 	}
-	// テキストだけなら文字列で送る（公式の例と同じ形）。
+	// Text alone is sent as a string (the same shape as the official example).
 	if body["input"] != "piano" {
-		t.Errorf("input = %v, want 文字列 \"piano\"", body["input"])
+		t.Errorf("input = %v, want the string \"piano\"", body["input"])
 	}
 	if got := jsonOf(t, body["response_format"]); got != `{"mime_type":"audio/wav","type":"audio"}` {
 		t.Errorf("response_format = %s", got)
@@ -96,19 +96,19 @@ func TestInteractionsGenerateBuildsAudioRequest(t *testing.T) {
 	if body["system_instruction"] != "sys" {
 		t.Errorf("system_instruction = %v", body["system_instruction"])
 	}
-	// genai の "HARM_CATEGORY_HARASSMENT" は Interactions の小文字表記へ写す。BLOCK_NONE は
-	// API が受け付けないため off へ写す。
+	// genai's "HARM_CATEGORY_HARASSMENT" maps to Interactions' lowercase notation. BLOCK_NONE maps
+	// to off because the API does not accept it.
 	safety := jsonOf(t, body["safety_settings"])
 	if strings.Contains(safety, "block_none") {
-		t.Errorf("API が拒否する block_none を送っています: %s", safety)
+		t.Errorf("sending block_none, which the API rejects: %s", safety)
 	}
 	for _, want := range []string{`"type":"harassment"`, `"type":"hate_speech"`, `"threshold":"off"`} {
 		if !strings.Contains(safety, want) {
-			t.Errorf("safety_settings に %s がありません: %s", want, safety)
+			t.Errorf("%s is missing from safety_settings: %s", want, safety)
 		}
 	}
 	if len(fake.gotOpts) != 1 {
-		t.Errorf("リトライ設定が渡っていません（opts = %d 件）", len(fake.gotOpts))
+		t.Errorf("retry settings were not passed (opts = %d entries)", len(fake.gotOpts))
 	}
 }
 
@@ -124,11 +124,11 @@ func TestInteractionsGenerateFormatPrecedence(t *testing.T) {
 		name       string
 		defaultFmt string
 		perCall    string
-		want       string // 空なら response_format を送らない
+		want       string // if empty, response_format is not sent
 	}{
-		{name: "既定の形式を使う", defaultFmt: "audio/wav", want: "audio/wav"},
-		{name: "呼び出しごとの音声形式が優先", defaultFmt: "audio/wav", perCall: "audio/mp3", want: "audio/mp3"},
-		{name: "どちらも無ければ送らない"},
+		{name: "uses the default format", defaultFmt: "audio/wav", want: "audio/wav"},
+		{name: "the per-call audio format takes precedence", defaultFmt: "audio/wav", perCall: "audio/mp3", want: "audio/mp3"},
+		{name: "not sent when neither is set"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -136,12 +136,12 @@ func TestInteractionsGenerateFormatPrecedence(t *testing.T) {
 			g := newTestInteractions(fake, InteractionsConfig{AudioMIMEType: tt.defaultFmt})
 
 			if _, err := g.Generate(context.Background(), "lyria-3.5", "piano", nil, GenerateOptions{ResponseMIMEType: tt.perCall}); err != nil {
-				t.Fatalf("予期しないエラー: %v", err)
+				t.Fatalf("unexpected error: %v", err)
 			}
 			format, ok := sentBody(t, fake)["response_format"]
 			if tt.want == "" {
 				if ok {
-					t.Errorf("response_format を送らないはずが %v", format)
+					t.Errorf("response_format should not be sent, got %v", format)
 				}
 				return
 			}
@@ -153,7 +153,7 @@ func TestInteractionsGenerateFormatPrecedence(t *testing.T) {
 }
 
 func TestInteractionsGenerateAttachments(t *testing.T) {
-	t.Run("画像はテキストの後に内容ブロックで送る", func(t *testing.T) {
+	t.Run("images are sent as content blocks after the text", func(t *testing.T) {
 		fake := &fakeInteractionClient{resp: interactionFromJSON(t, lyriaWAVResponse)}
 		g := newTestInteractions(fake, InteractionsConfig{})
 
@@ -163,12 +163,12 @@ func TestInteractionsGenerateAttachments(t *testing.T) {
 			{MIMEType: "image/jpeg", URI: "gs://bucket/a.jpg"},
 		}, GenerateOptions{})
 		if err != nil {
-			t.Fatalf("予期しないエラー: %v", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
 
 		input, ok := sentBody(t, fake)["input"].([]any)
 		if !ok || len(input) != 3 {
-			t.Fatalf("input = %v, want 3 ブロック（空の添付は落とす）", sentBody(t, fake)["input"])
+			t.Fatalf("input = %v, want 3 blocks (empty attachments are dropped)", sentBody(t, fake)["input"])
 		}
 		want := []string{
 			`{"text":"piano","type":"text"}`,
@@ -187,9 +187,9 @@ func TestInteractionsGenerateAttachments(t *testing.T) {
 		attachments []Attachment
 		wantErr     error
 	}{
-		{name: "URI でも MIME type が要る", attachments: []Attachment{{URI: "gs://bucket/a.png"}}, wantErr: ErrInvalidAttachment},
-		{name: "画像と音声以外は送れない", attachments: []Attachment{{MIMEType: "application/pdf", Data: []byte("pdf")}}, wantErr: ErrInvalidAttachment},
-		{name: "Data と URI は排他", attachments: []Attachment{{MIMEType: "image/png", Data: []byte("x"), URI: "gs://b/x"}}, wantErr: ErrInvalidAttachment},
+		{name: "a URI also needs a MIME type", attachments: []Attachment{{URI: "gs://bucket/a.png"}}, wantErr: ErrInvalidAttachment},
+		{name: "nothing but images and audio can be sent", attachments: []Attachment{{MIMEType: "application/pdf", Data: []byte("pdf")}}, wantErr: ErrInvalidAttachment},
+		{name: "Data and URI are mutually exclusive", attachments: []Attachment{{MIMEType: "image/png", Data: []byte("x"), URI: "gs://b/x"}}, wantErr: ErrInvalidAttachment},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -201,7 +201,7 @@ func TestInteractionsGenerateAttachments(t *testing.T) {
 				t.Errorf("err = %v, want %v", err, tt.wantErr)
 			}
 			if fake.calls != 0 {
-				t.Errorf("不正な入力で API を呼んでいます（%d 回）", fake.calls)
+				t.Errorf("the API was called with invalid input (%d times)", fake.calls)
 			}
 		})
 	}
@@ -215,15 +215,15 @@ func TestInteractionsGenerateRejectsBeforeSending(t *testing.T) {
 		opts    GenerateOptions
 		wantErr error
 	}{
-		{name: "モデル名が空", prompt: "p", wantErr: ErrEmptyModelName},
-		{name: "入力が空", model: "m", wantErr: ErrEmptyParts},
-		{name: "シードが int32 を超える", model: "m", prompt: "p", opts: GenerateOptions{Seed: new(int64(1 << 40))}, wantErr: ErrInvalidSeed},
-		{name: "温度は写せない", model: "m", prompt: "p", opts: GenerateOptions{Temperature: new(float32(0))}, wantErr: ErrUnsupportedOption},
-		{name: "思考は写せない", model: "m", prompt: "p", opts: GenerateOptions{ThinkingLevel: ThinkingLow}, wantErr: ErrUnsupportedOption},
-		{name: "画像設定は写せない", model: "m", prompt: "p", opts: GenerateOptions{AspectRatio: "1:1"}, wantErr: ErrUnsupportedOption},
-		{name: "構造化出力は写せない", model: "m", prompt: "p", opts: GenerateOptions{ResponseJSONSchema: map[string]any{}}, wantErr: ErrUnsupportedOption},
-		{name: "音声以外の MIME type は写せない", model: "m", prompt: "p", opts: GenerateOptions{ResponseMIMEType: "application/json"}, wantErr: ErrUnsupportedOption},
-		{name: "GCS への書き出しは写せない", model: "m", prompt: "p", opts: GenerateOptions{OutputURIPrefix: "gs://bucket/out/"}, wantErr: ErrUnsupportedOption},
+		{name: "empty model name", prompt: "p", wantErr: ErrEmptyModelName},
+		{name: "empty input", model: "m", wantErr: ErrEmptyParts},
+		{name: "seed exceeds int32", model: "m", prompt: "p", opts: GenerateOptions{Seed: new(int64(1 << 40))}, wantErr: ErrInvalidSeed},
+		{name: "temperature cannot be mapped", model: "m", prompt: "p", opts: GenerateOptions{Temperature: new(float32(0))}, wantErr: ErrUnsupportedOption},
+		{name: "thinking cannot be mapped", model: "m", prompt: "p", opts: GenerateOptions{ThinkingLevel: ThinkingLow}, wantErr: ErrUnsupportedOption},
+		{name: "image settings cannot be mapped", model: "m", prompt: "p", opts: GenerateOptions{AspectRatio: "1:1"}, wantErr: ErrUnsupportedOption},
+		{name: "structured output cannot be mapped", model: "m", prompt: "p", opts: GenerateOptions{ResponseJSONSchema: map[string]any{}}, wantErr: ErrUnsupportedOption},
+		{name: "a non-audio MIME type cannot be mapped", model: "m", prompt: "p", opts: GenerateOptions{ResponseMIMEType: "application/json"}, wantErr: ErrUnsupportedOption},
+		{name: "writing to GCS cannot be mapped", model: "m", prompt: "p", opts: GenerateOptions{OutputURIPrefix: "gs://bucket/out/"}, wantErr: ErrUnsupportedOption},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -235,7 +235,7 @@ func TestInteractionsGenerateRejectsBeforeSending(t *testing.T) {
 				t.Errorf("err = %v, want %v", err, tt.wantErr)
 			}
 			if fake.calls != 0 {
-				t.Errorf("送る前に止めるはずが API を呼んでいます（%d 回）", fake.calls)
+				t.Errorf("should stop before sending, but the API was called (%d times)", fake.calls)
 			}
 		})
 	}
@@ -247,17 +247,17 @@ func TestInteractionsGenerateReadsSteps(t *testing.T) {
 
 	resp, err := g.Generate(context.Background(), "lyria-3.5", "piano", nil, GenerateOptions{})
 	if err != nil {
-		t.Fatalf("予期しないエラー: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if resp.Text != "[[A0]]\n[[B1]]" {
 		t.Errorf("Text = %q", resp.Text)
 	}
 	if len(resp.Attachments) != 1 || resp.Attachments[0].MIMEType != "audio/wav" || string(resp.Attachments[0].Data) != "RIFF" {
-		t.Errorf("Attachments = %+v, want audio/wav の RIFF 1 件", resp.Attachments)
+		t.Errorf("Attachments = %+v, want one audio/wav RIFF entry", resp.Attachments)
 	}
 	if len(resp.Audios) != 1 || len(resp.Images) != 0 {
-		t.Errorf("Audios = %d 件, Images = %d 件", len(resp.Audios), len(resp.Images))
+		t.Errorf("Audios = %d entries, Images = %d entries", len(resp.Audios), len(resp.Images))
 	}
 	if resp.Usage == nil || resp.Usage.PromptTokenCount != 5 || resp.Usage.CandidatesTokenCount != 2177 || resp.Usage.TotalTokenCount != 2182 {
 		t.Errorf("Usage = %+v", resp.Usage)
@@ -272,30 +272,30 @@ func TestInteractionsGenerateClassifiesFailures(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name:    "上限で打ち切られた途中結果",
+			name:    "partial result cut off at a limit",
 			raw:     `{"status": "incomplete"}`,
 			wantErr: ErrTruncated,
 		},
 		{
-			// 自動継続（genai v1.77.0 から既定）を通っても続きが残った場合。generateContent の
-			// CONTINUATION と同じく、拒否ではなく打ち切りとして扱う。
-			name:    "出力上限で止まったまま残った",
+			// When the rest remains even after automatic continuation (the default since genai v1.77.0). Like
+			// generateContent's CONTINUATION, it is treated as a truncation, not a refusal.
+			name:    "left stopped at the output limit",
 			raw:     `{"status": "requires_continuation", "continuation_token": "t"}`,
 			wantErr: ErrTruncated,
 		},
 		{
-			name:        "失敗は API のメッセージを残す",
+			name:        "a failure keeps the API's message",
 			raw:         `{"status": "failed", "errors": [{"code": "x", "message": "vocal likeness"}]}`,
 			wantErr:     ErrEmptyResponse,
 			wantMessage: "vocal likeness",
 		},
 		{
-			name:    "完了しても出力が無い",
+			name:    "completed but no output",
 			raw:     `{"status": "completed", "steps": []}`,
 			wantErr: ErrEmptyResponse,
 		},
 		{
-			name:        "出力ステップのエラー",
+			name:        "error in an output step",
 			raw:         `{"status": "completed", "steps": [{"type": "model_output", "error": {"code": 3, "message": "bad"}}]}`,
 			wantErr:     ErrEmptyResponse,
 			wantMessage: "bad",
@@ -311,18 +311,18 @@ func TestInteractionsGenerateClassifiesFailures(t *testing.T) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
 			if _, ok := errors.AsType[*APIResponseError](err); !ok {
-				t.Errorf("APIResponseError として取り出せません: %v", err)
+				t.Errorf("cannot be extracted as APIResponseError: %v", err)
 			}
 			if tt.wantMessage != "" && !strings.Contains(err.Error(), tt.wantMessage) {
-				t.Errorf("err = %v, want %q を含む", err, tt.wantMessage)
+				t.Errorf("err = %v, want it to contain %q", err, tt.wantMessage)
 			}
 		})
 	}
 }
 
-// 自動継続が途中で止まると、SDK は ContinuationInterruptedError を返します。呼び出し側は
-// タイムアウトを errors.Is(err, context.DeadlineExceeded) で見分けるので、原因が鎖に残ることを
-// 確かめます。
+// When automatic continuation stops midway, the SDK returns ContinuationInterruptedError. Callers
+// tell a timeout apart with errors.Is(err, context.DeadlineExceeded), so this checks that the cause
+// stays in the chain.
 func TestInteractionsGenerateKeepsTheCauseOfAnInterruptedContinuation(t *testing.T) {
 	fake := &fakeInteractionClient{err: &apierrors.ContinuationInterruptedError{
 		Message: "continuation interrupted",
@@ -332,10 +332,10 @@ func TestInteractionsGenerateKeepsTheCauseOfAnInterruptedContinuation(t *testing
 
 	_, err := g.Generate(context.Background(), "lyria-3.5", "piano", nil, GenerateOptions{})
 	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("err = %v, want context.DeadlineExceeded を含む", err)
+		t.Fatalf("err = %v, want it to contain context.DeadlineExceeded", err)
 	}
 	if _, ok := errors.AsType[*apierrors.ContinuationInterruptedError](err); !ok {
-		t.Errorf("ContinuationInterruptedError として取り出せません: %v", err)
+		t.Errorf("cannot be extracted as ContinuationInterruptedError: %v", err)
 	}
 }
 
@@ -346,23 +346,23 @@ func TestInteractionsGenerateWrapsTransportError(t *testing.T) {
 
 	_, err := g.Generate(context.Background(), "lyria-3.5", "piano", nil, GenerateOptions{})
 	if !errors.Is(err, sentinel) {
-		t.Fatalf("元のエラーを辿れません: %v", err)
+		t.Fatalf("cannot reach the original error: %v", err)
 	}
-	// どの経路の失敗かを文面で分かるようにする（Vertex AI と取り違えない）。
+	// Make it clear from the wording which path failed (not to be confused with Vertex AI).
 	if !strings.Contains(err.Error(), "Interactions") || !strings.Contains(err.Error(), "lyria-3.5") {
-		t.Errorf("err = %v, want 経路名とモデル名を含む", err)
+		t.Errorf("err = %v, want it to contain the path name and model name", err)
 	}
 }
 
 func TestConfigInteractionRetryConfig(t *testing.T) {
-	t.Run("DisableRetry は既定ではなく none を返す", func(t *testing.T) {
+	t.Run("DisableRetry returns none rather than the default", func(t *testing.T) {
 		got := Config{DisableRetry: true}.interactionRetryConfig()
 		if got == nil || got.Strategy != "none" {
 			t.Errorf("got = %+v, want Strategy none", got)
 		}
 	})
 
-	t.Run("既定値は generateContent 側と同じ方針", func(t *testing.T) {
+	t.Run("defaults follow the same policy as generateContent", func(t *testing.T) {
 		got := Config{}.interactionRetryConfig()
 		if got.Strategy != "attempt-count-backoff" || got.MaxRetries == nil || *got.MaxRetries != int(DefaultMaxRetries) {
 			t.Errorf("got = %+v", got)
@@ -372,7 +372,7 @@ func TestConfigInteractionRetryConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("指定値を写す", func(t *testing.T) {
+	t.Run("copies the specified values", func(t *testing.T) {
 		got := Config{MaxRetries: 2}.interactionRetryConfig()
 		if *got.MaxRetries != 2 {
 			t.Errorf("MaxRetries = %d, want 2", *got.MaxRetries)

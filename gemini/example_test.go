@@ -7,12 +7,12 @@ import (
 	"github.com/shouni/genai-kit/gemini"
 )
 
-// 生成パラメータはリクエストごとに GenerateOptions で指定します。
-// Temperature のようにゼロ値が意味を持つ項目はポインタなので、new(式) で渡します。
+// Generation parameters are specified per request with GenerateOptions.
+// Fields whose zero value is meaningful, such as Temperature, are pointers, so pass them with new(expr).
 func ExampleGenerateOptions() {
 	opts := gemini.GenerateOptions{
-		SystemPrompt:    "あなたは簡潔に答えるアシスタントです。",
-		Temperature:     new(float32(0)), // 0 = 最も決定的
+		SystemPrompt:    "You are an assistant that answers concisely.",
+		Temperature:     new(float32(0)), // 0 = most deterministic
 		MaxOutputTokens: 1024,
 		StopSequences:   []string{"###"},
 	}
@@ -21,13 +21,13 @@ func ExampleGenerateOptions() {
 	// Output: 0 1024
 }
 
-// 思考機能はコストとレイテンシに直結するため、ThinkingBudget を 0 にして
-// 明示的に無効化できます。モデルを跨いで使う場合は ThinkingLevel が移植性に優れます。
+// Thinking directly affects cost and latency, so it can be disabled explicitly by
+// setting ThinkingBudget to 0. When used across models, ThinkingLevel is more portable.
 func ExampleGenerateOptions_thinking() {
-	// 思考を無効化してレイテンシを抑える。
+	// Disable thinking to keep latency down.
 	fast := gemini.GenerateOptions{ThinkingBudget: new(int32(0))}
 
-	// 段階指定。ThinkingBudget と併用した場合はこちらが優先される。
+	// A level setting. When combined with ThinkingBudget, this one takes precedence.
 	deep := gemini.GenerateOptions{
 		ThinkingLevel:   gemini.ThinkingHigh,
 		IncludeThoughts: true,
@@ -37,7 +37,7 @@ func ExampleGenerateOptions_thinking() {
 	// Output: 0 HIGH true
 }
 
-// 構造化出力のスキーマは、genai SDK を import せずにこのパッケージの別名で書けます。
+// A structured-output schema can be written with this package's aliases, without importing the genai SDK.
 func ExampleSchema() {
 	opts := gemini.GenerateOptions{
 		ResponseMIMEType: "application/json",
@@ -55,20 +55,20 @@ func ExampleSchema() {
 	// Output: OBJECT [title]
 }
 
-// 生成失敗の理由は errors.Is / errors.AsType で分類できます。
-// ブロックはリトライしても解決しないため、プロンプトの見直しが必要です。
+// The reason a generation failed can be classified with errors.Is / errors.AsType.
+// A block is not fixed by retrying, so the prompt needs revising.
 func ExampleAPIResponseError() {
-	// 実際には Generate / GenerateText が返すエラーを受け取ります。
+	// In practice you receive the error returned by Generate / GenerateText.
 	var err error = &gemini.APIResponseError{
 		Reason:  gemini.ErrEmptyResponse,
-		Message: "Vertex AI から空のレスポンスが返されました",
+		Message: "Vertex AI returned an empty response",
 	}
 
 	switch {
 	case errors.Is(err, gemini.ErrBlocked):
-		fmt.Println("blocked: プロンプトを見直してください")
+		fmt.Println("blocked: revise the prompt")
 	case errors.Is(err, gemini.ErrEmptyResponse):
-		fmt.Println("empty: 候補が返りませんでした")
+		fmt.Println("empty: no candidates were returned")
 	}
 
 	if apiErr, ok := errors.AsType[*gemini.APIResponseError](err); ok {
@@ -76,15 +76,15 @@ func ExampleAPIResponseError() {
 	}
 
 	// Output:
-	// empty: 候補が返りませんでした
+	// empty: no candidates were returned
 	// reason: gemini: empty response
 }
 
-// CleanJSONResponse は構造化出力に混じる Markdown 装飾や末尾ノイズを取り除きます。
+// CleanJSONResponse strips the Markdown decoration and trailing noise mixed into structured output.
 func ExampleCleanJSONResponse() {
 	fmt.Println(gemini.CleanJSONResponse("```json\n{\"title\":\"ok\"}\n```"))
-	fmt.Println(gemini.CleanJSONResponse(`{"title":"ok"} このあとに説明が続く`))
-	fmt.Println(gemini.CleanJSONResponse(`前置き [1,2,3] 後置き`))
+	fmt.Println(gemini.CleanJSONResponse(`{"title":"ok"} followed by an explanation`))
+	fmt.Println(gemini.CleanJSONResponse(`preamble [1,2,3] postscript`))
 
 	// Output:
 	// {"title":"ok"}
@@ -92,8 +92,8 @@ func ExampleCleanJSONResponse() {
 	// [1,2,3]
 }
 
-// Config は Vertex AI 専用で、ProjectID と LocationID の両方が必須です。
-// 認証は ADC に従うため、HTTPClient を差し替えても認証は落ちません。
+// Config is Vertex AI only, and both ProjectID and LocationID are required.
+// Authentication follows ADC, so replacing HTTPClient does not drop authentication.
 func ExampleConfig() {
 	cfg := gemini.Config{
 		ProjectID:  "my-project",

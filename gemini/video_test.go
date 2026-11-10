@@ -13,8 +13,8 @@ func newVideoTestClient(video *fakeVideoClient) *Client {
 	return &Client{videoClient: video}
 }
 
-// TestStartVideoBuildsImageToVideoRequest は、開始フレームと生成パラメータが SDK の
-// 入力へ正しく変換されることを検証します。
+// TestStartVideoBuildsImageToVideoRequest checks that the start frame and generation parameters
+// are converted correctly into the SDK's input.
 func TestStartVideoBuildsImageToVideoRequest(t *testing.T) {
 	video := &fakeVideoClient{}
 	client := newVideoTestClient(video)
@@ -69,9 +69,9 @@ func TestStartVideoBuildsImageToVideoRequest(t *testing.T) {
 	}
 }
 
-// TestStartVideoBuildsLastFrame は、終了フレームが設定側（config）へ載ることを
-// 検証します。開始フレームは source、終了フレームは config と、SDK 側で置き場所が
-// 分かれています。
+// TestStartVideoBuildsLastFrame checks that the last frame is placed on the config side.
+// The SDK keeps them in different places: the start frame in source, the last frame in
+// config.
 func TestStartVideoBuildsLastFrame(t *testing.T) {
 	video := &fakeVideoClient{}
 	client := newVideoTestClient(video)
@@ -89,8 +89,7 @@ func TestStartVideoBuildsLastFrame(t *testing.T) {
 	}
 }
 
-// TestStartVideoBuildsReferenceImages は、参照画像が種別付きで SDK へ渡ることを
-// 検証します。
+// TestStartVideoBuildsReferenceImages checks that reference images reach the SDK with their type.
 func TestStartVideoBuildsReferenceImages(t *testing.T) {
 	video := &fakeVideoClient{}
 	client := newVideoTestClient(video)
@@ -99,7 +98,7 @@ func TestStartVideoBuildsReferenceImages(t *testing.T) {
 		Prompt: "a character walking",
 		References: []VideoReference{
 			{Image: Attachment{URI: "gs://bucket/char.png"}, Type: VideoReferenceAsset},
-			{Image: Attachment{}}, // 空の参照は落とす
+			{Image: Attachment{}}, // an empty reference is dropped
 			{Image: Attachment{URI: "gs://bucket/style.png"}, Type: VideoReferenceStyle},
 		},
 	})
@@ -109,7 +108,7 @@ func TestStartVideoBuildsReferenceImages(t *testing.T) {
 
 	refs := video.gotConfig.ReferenceImages
 	if len(refs) != 2 {
-		t.Fatalf("referenceImages = %d, want 2（空の要素は落とす）", len(refs))
+		t.Fatalf("referenceImages = %d, want 2 (empty elements are dropped)", len(refs))
 	}
 	if refs[0].Image.GCSURI != "gs://bucket/char.png" || refs[0].ReferenceType != VideoReferenceAsset {
 		t.Errorf("references[0] = %+v", refs[0])
@@ -119,8 +118,7 @@ func TestStartVideoBuildsReferenceImages(t *testing.T) {
 	}
 }
 
-// TestStartVideoBuildsVideoExtension は、継続生成の入力動画が SDK へ渡ることを
-// 検証します。
+// TestStartVideoBuildsVideoExtension checks that the input video for an extension reaches the SDK.
 func TestStartVideoBuildsVideoExtension(t *testing.T) {
 	video := &fakeVideoClient{}
 	client := newVideoTestClient(video)
@@ -136,12 +134,12 @@ func TestStartVideoBuildsVideoExtension(t *testing.T) {
 		t.Errorf("video = %+v", video.gotSource.Video)
 	}
 	if video.gotSource.Image != nil {
-		t.Errorf("image = %+v, want なし", video.gotSource.Image)
+		t.Errorf("image = %+v, want none", video.gotSource.Image)
 	}
 }
 
-// TestStartVideoKeepsRetries は、投函がクライアントのリトライ設定のまま送られることを
-// 検証します。ポーリングと違い、投函での 429 は動画 1 本分の生成を落とします。
+// TestStartVideoKeepsRetries checks that the submission is sent with the client's retry settings
+// intact. Unlike polling, a 429 on submission loses the generation of a whole video.
 func TestStartVideoKeepsRetries(t *testing.T) {
 	video := &fakeVideoClient{}
 	client := newVideoTestClient(video)
@@ -150,16 +148,16 @@ func TestStartVideoKeepsRetries(t *testing.T) {
 		t.Fatalf("StartVideo() error = %v", err)
 	}
 	if video.gotConfig.HTTPOptions != nil {
-		t.Errorf("httpOptions = %+v, want nil（クライアント設定を打ち消さない）", video.gotConfig.HTTPOptions)
+		t.Errorf("httpOptions = %+v, want nil (do not cancel out the client settings)", video.gotConfig.HTTPOptions)
 	}
 }
 
-// TestStartVideoPassesExtraBody は、SDK が型として持たないフィールドを ExtraBody で
-// 送れることを検証します。
+// TestStartVideoPassesExtraBody checks that fields the SDK has no type for can be sent with
+// ExtraBody.
 //
-// ここで parameters 配下（マップ）を例にしているのは意図的です。ExtraBody のマージは
-// マップ同士のときだけ再帰し、instances のような配列は丸ごと置き換わってしまうため、
-// 配列へ差し込む用途には ModifyRequestBody を使います。
+// Using something under parameters (a map) as the example is deliberate. ExtraBody merging
+// only recurses when both sides are maps, and an array such as instances is replaced wholesale,
+// so use ModifyRequestBody to insert into an array.
 func TestStartVideoPassesExtraBody(t *testing.T) {
 	video := &fakeVideoClient{}
 	client := newVideoTestClient(video)
@@ -174,13 +172,13 @@ func TestStartVideoPassesExtraBody(t *testing.T) {
 
 	opts := video.gotConfig.HTTPOptions
 	if opts == nil || opts.ExtraBody == nil {
-		t.Fatalf("httpOptions = %+v, want ExtraBody が渡ること", opts)
+		t.Fatalf("httpOptions = %+v, want ExtraBody passed through", opts)
 	}
 }
 
-// TestStartVideoPassesModifyRequestBody は、組み立て済みボディを書き換えるフックが
-// SDK へ渡ることを検証します。ExtraBody では届かない配列要素の中（Vertex AI の
-// instances[0] など）へ値を足すための唯一の手段です。
+// TestStartVideoPassesModifyRequestBody checks that the hook rewriting the assembled body reaches
+// the SDK. It is the only way to add values inside array elements that ExtraBody cannot reach
+// (such as Vertex AI's instances[0]).
 func TestStartVideoPassesModifyRequestBody(t *testing.T) {
 	video := &fakeVideoClient{}
 	client := newVideoTestClient(video)
@@ -198,18 +196,18 @@ func TestStartVideoPassesModifyRequestBody(t *testing.T) {
 
 	opts := video.gotConfig.HTTPOptions
 	if opts == nil || opts.ExtrasRequestProvider == nil {
-		t.Fatalf("httpOptions = %+v, want ExtrasRequestProvider が渡ること", opts)
+		t.Fatalf("httpOptions = %+v, want ExtrasRequestProvider passed through", opts)
 	}
-	// SDK は組み立て済みボディを渡してくるので、そのまま書き換えて返せる。
+	// The SDK passes the assembled body, so it can be rewritten and returned as is.
 	got := opts.ExtrasRequestProvider(map[string]any{"instances": []any{map[string]any{}}})
 	if got["touched"] != true {
-		t.Errorf("modified body = %+v, want フックが適用されること", got)
+		t.Errorf("modified body = %+v, want the hook applied", got)
 	}
 }
 
-// TestStartVideoRejectsInvalidInputCombinations は、API が受け付けない入力の
-// 組み合わせを送信前に弾くことを検証します。Veo は video と image / referenceImages を
-// 併用できず、lastFrame は image とセットでのみ有効です。
+// TestStartVideoRejectsInvalidInputCombinations checks that input combinations the API does not
+// accept are refused before sending. Veo cannot combine video with image / referenceImages, and
+// lastFrame is valid only together with image.
 func TestStartVideoRejectsInvalidInputCombinations(t *testing.T) {
 	image := &Attachment{URI: "gs://bucket/kf.png"}
 
@@ -219,32 +217,32 @@ func TestStartVideoRejectsInvalidInputCombinations(t *testing.T) {
 		want error
 	}{
 		{
-			name: "Image と Video の併用",
+			name: "Image together with Video",
 			req:  VideoRequest{Prompt: "p", Image: image, Video: &Attachment{URI: "gs://bucket/prev.mp4"}},
 			want: ErrInvalidVideoInput,
 		},
 		{
-			name: "References と Image の併用",
+			name: "References together with Image",
 			req:  VideoRequest{Prompt: "p", Image: image, References: []VideoReference{{Image: Attachment{URI: "gs://bucket/char.png"}}}},
 			want: ErrInvalidVideoInput,
 		},
 		{
-			name: "References と Video の併用",
+			name: "References together with Video",
 			req:  VideoRequest{Prompt: "p", Video: &Attachment{URI: "gs://bucket/prev.mp4"}, References: []VideoReference{{Image: Attachment{URI: "gs://bucket/char.png"}}}},
 			want: ErrInvalidVideoInput,
 		},
 		{
-			name: "開始フレーム無しの LastFrame",
+			name: "LastFrame without a start frame",
 			req:  VideoRequest{Prompt: "p", LastFrame: &Attachment{URI: "gs://bucket/next.png"}},
 			want: ErrInvalidVideoInput,
 		},
 		{
-			name: "Data と URI の併用",
+			name: "Data together with URI",
 			req:  VideoRequest{Prompt: "p", Image: &Attachment{URI: "gs://bucket/kf.png", Data: []byte{0x89}}},
 			want: ErrInvalidVideoInput,
 		},
 		{
-			name: "プロンプトもメディアも無い",
+			name: "neither prompt nor media",
 			req:  VideoRequest{},
 			want: ErrEmptyPrompt,
 		},
@@ -260,14 +258,14 @@ func TestStartVideoRejectsInvalidInputCombinations(t *testing.T) {
 				t.Fatalf("StartVideo() error = %v, want %v", err, tt.want)
 			}
 			if video.calls != 0 {
-				t.Errorf("SDK 呼び出し = %d 回, want 送信前に弾かれること", video.calls)
+				t.Errorf("SDK calls = %d, want refused before sending", video.calls)
 			}
 		})
 	}
 }
 
-// TestStartVideoValidatesSeedRange は、int32 に収まらないシードを送信前に弾くことを
-// 検証します（SDK のシードは int32）。
+// TestStartVideoValidatesSeedRange checks that a seed that does not fit in int32 is refused
+// before sending (the SDK's seed is int32).
 func TestStartVideoValidatesSeedRange(t *testing.T) {
 	video := &fakeVideoClient{}
 	client := newVideoTestClient(video)
@@ -287,9 +285,9 @@ func TestStartVideoRequiresModelName(t *testing.T) {
 	}
 }
 
-// TestPollVideoDisablesRetries は、1 回の問い合わせが SDK のバックオフを挟まないことを
-// 検証します。ポーリング自体が繰り返しの仕組みなので、内側でさらに待つと呼び出し側の
-// 間隔とタイムアウトが意味を失います。
+// TestPollVideoDisablesRetries checks that a single query does not go through the SDK's backoff.
+// Polling is itself a repetition mechanism, so waiting further inside it would make the caller's
+// interval and timeout meaningless.
 func TestPollVideoDisablesRetries(t *testing.T) {
 	video := &fakeVideoClient{pollOp: &genai.GenerateVideosOperation{Name: "operations/abc"}}
 	client := newVideoTestClient(video)
@@ -300,15 +298,15 @@ func TestPollVideoDisablesRetries(t *testing.T) {
 
 	cfg := video.gotPollConfig
 	if cfg == nil || cfg.HTTPOptions == nil || cfg.HTTPOptions.RetryOptions == nil {
-		t.Fatalf("getOperationConfig = %+v, want リトライ打ち消しが載ること", cfg)
+		t.Fatalf("getOperationConfig = %+v, want the retry override applied", cfg)
 	}
 	if *cfg.HTTPOptions.RetryOptions.Attempts != 1 {
 		t.Errorf("Attempts = %d, want 1", *cfg.HTTPOptions.RetryOptions.Attempts)
 	}
 }
 
-// TestPollVideoMapsCompletedOperation は、完了したオペレーションの生成結果と
-// 安全性フィルタの情報が公開型へ移されることを検証します。
+// TestPollVideoMapsCompletedOperation checks that the generation results and safety filter
+// information of a completed operation are carried over into the public type.
 func TestPollVideoMapsCompletedOperation(t *testing.T) {
 	video := &fakeVideoClient{
 		pollOp: &genai.GenerateVideosOperation{
@@ -317,8 +315,8 @@ func TestPollVideoMapsCompletedOperation(t *testing.T) {
 			Response: &genai.GenerateVideosResponse{
 				GeneratedVideos: []*genai.GeneratedVideo{
 					{Video: &genai.Video{URI: "gs://bucket/out.mp4", MIMEType: "video/mp4"}},
-					nil,          // 欠けた要素があっても落とさない
-					{Video: nil}, // 動画の無い要素も同様
+					nil,          // missing elements do not cause a failure
+					{Video: nil}, // nor do elements without a video
 				},
 				RAIMediaFilteredCount:   1,
 				RAIMediaFilteredReasons: []string{"violence"},
@@ -345,13 +343,13 @@ func TestPollVideoMapsCompletedOperation(t *testing.T) {
 		t.Errorf("filtered = %d %v", op.FilteredCount, op.FilteredReasons)
 	}
 	if op.Failure != nil {
-		t.Errorf("failure = %v, want なし", op.Failure)
+		t.Errorf("failure = %v, want none", op.Failure)
 	}
 }
 
-// TestPollVideoMapsOperationFailure は、失敗として完了したオペレーションが
-// ErrVideoGenerationFailed で判定できる error になることを検証します。
-// 取得自体は成功しているため、PollVideo はメソッドのエラーとしては返しません。
+// TestPollVideoMapsOperationFailure checks that an operation completed as a failure becomes an
+// error that can be classified with ErrVideoGenerationFailed.
+// Fetching itself succeeded, so PollVideo does not return it as the method's error.
 func TestPollVideoMapsOperationFailure(t *testing.T) {
 	video := &fakeVideoClient{
 		pollOp: &genai.GenerateVideosOperation{
@@ -368,21 +366,21 @@ func TestPollVideoMapsOperationFailure(t *testing.T) {
 
 	op, err := client.PollVideo(context.Background(), "operations/abc")
 	if err != nil {
-		t.Fatalf("PollVideo() error = %v, want 失敗はオペレーション側に載ること", err)
+		t.Fatalf("PollVideo() error = %v, want the failure carried on the operation", err)
 	}
 	if !errors.Is(op.Failure, ErrVideoGenerationFailed) {
 		t.Fatalf("failure = %v, want ErrVideoGenerationFailed", op.Failure)
 	}
 	for _, want := range []string{"code=3", "INVALID_ARGUMENT", "exceeds the maximum duration"} {
 		if !strings.Contains(op.Failure.Error(), want) {
-			t.Errorf("failure = %q, want %q を含むこと", op.Failure.Error(), want)
+			t.Errorf("failure = %q, want it to contain %q", op.Failure.Error(), want)
 		}
 	}
 }
 
-// TestVideoOperationFailureFallsBackToRawPayload は、既知のキーが 1 つも無い失敗でも
-// 情報を落とさないことを検証します。genai がこのフィールドを map のまま公開している
-// 以上、キーの構成は保証されません。
+// TestVideoOperationFailureFallsBackToRawPayload checks that no information is lost even for a
+// failure with none of the known keys. As long as genai exposes this field as a raw map, its key
+// layout is not guaranteed.
 func TestVideoOperationFailureFallsBackToRawPayload(t *testing.T) {
 	err := videoOperationFailure(map[string]any{"unexpected": "shape"})
 
@@ -390,7 +388,7 @@ func TestVideoOperationFailureFallsBackToRawPayload(t *testing.T) {
 		t.Fatalf("failure = %v, want ErrVideoGenerationFailed", err)
 	}
 	if !strings.Contains(err.Error(), "unexpected") {
-		t.Errorf("failure = %q, want 生のペイロードを含むこと", err)
+		t.Errorf("failure = %q, want it to contain the raw payload", err)
 	}
 
 	if got := videoOperationFailure(nil); got != nil {
@@ -406,8 +404,8 @@ func TestPollVideoRequiresOperationName(t *testing.T) {
 	}
 }
 
-// TestVideoOperationFromNil は、SDK が nil のオペレーションを返した場合に
-// 空レスポンスとして分類されることを検証します。
+// TestVideoOperationFromNil checks that a nil operation returned by the SDK is classified as an
+// empty response.
 func TestVideoOperationFromNil(t *testing.T) {
 	_, err := videoOperationFrom(nil)
 

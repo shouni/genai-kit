@@ -13,30 +13,31 @@ import (
 	"google.golang.org/genai/interactions/retry"
 )
 
-// InteractionsGenerator が Generator を満たすことをコンパイル時に保証します。
+// These assertions guarantee at compile time that InteractionsGenerator satisfies Generator.
 var _ Generator = (*InteractionsGenerator)(nil)
 
-// InteractionsConfig は Client.Interactions の設定です。
+// InteractionsConfig is the configuration for Client.Interactions.
 type InteractionsConfig struct {
-	// AudioMIMEType は、音声を返すモデルに要求する出力形式です（"audio/wav" など）。
-	// 空なら形式を指定せず、モデルの既定（Lyria では MP3）になります。
+	// AudioMIMEType is the output format requested from models that return audio ("audio/wav", etc.).
+	// If empty, no format is specified and the model's default applies (MP3 for Lyria).
 	//
-	// 呼び出しごとの GenerateOptions.ResponseMIMEType が "audio/" で始まる場合はそちらが
-	// 優先されます。音声を返さないモデルに形式を指定すると API が拒否するため、これを
-	// 設定した InteractionsGenerator は音声生成専用にしてください。
+	// If a call's GenerateOptions.ResponseMIMEType starts with "audio/", that one takes
+	// precedence. The API rejects a format specified for a model that does not return audio, so
+	// keep an InteractionsGenerator with this set dedicated to audio generation.
 	AudioMIMEType string
 }
 
-// InteractionsGenerator は、Interactions API で生成する Generator です。
+// InteractionsGenerator is a Generator that generates through the Interactions API.
 //
-// generateContent には音声の出力形式を指定する口が無く、Lyria は MP3 しか返せません。
-// Interactions は response_format で形式を選べるため、音声生成だけをこちらへ逃がす用途を
-// 想定しています（lyria.WithAudioGenerator に渡します）。作詞・作曲のようなテキスト生成は
-// 従来の Client.Generate のままで構いません。
+// generateContent has no way to specify the audio output format, and Lyria can only return MP3.
+// Interactions can choose the format with response_format, so the intended use is to divert audio
+// generation alone here (pass it to lyria.WithAudioGenerator). Text generation such as lyrics and
+// composition can stay on the usual Client.Generate.
 //
-// Interactions の生成パラメータは generateContent より少なく、写せない GenerateOptions
-// （サンプリング・思考・画像設定・構造化出力など）が指定された場合は ErrUnsupportedOption を
-// 返します。黙って落とすと、指定したつもりの設定が効かないまま生成が課金されるためです。
+// Interactions has fewer generation parameters than generateContent, and when GenerateOptions that
+// cannot be mapped (sampling, thinking, image settings, structured output, etc.) are specified, it
+// returns ErrUnsupportedOption. Dropping them silently would bill a generation with settings the
+// caller thought were applied having no effect.
 type InteractionsGenerator struct {
 	client         interactionClient
 	retries        *retry.Config
@@ -44,8 +45,8 @@ type InteractionsGenerator struct {
 	audioMIMEType  string
 }
 
-// Interactions は、このクライアントの認証・リトライ・タイムアウト設定を引き継いだ
-// InteractionsGenerator を返します。
+// Interactions returns an InteractionsGenerator that inherits this client's authentication,
+// retry and timeout settings.
 func (c *Client) Interactions(cfg InteractionsConfig) *InteractionsGenerator {
 	return &InteractionsGenerator{
 		client:         c.interactionClient,
@@ -55,7 +56,7 @@ func (c *Client) Interactions(cfg InteractionsConfig) *InteractionsGenerator {
 	}
 }
 
-// Generate は、テキストプロンプトと添付から Interactions API で 1 回生成します。
+// Generate generates once through the Interactions API from a text prompt and attachments.
 func (g *InteractionsGenerator) Generate(ctx context.Context, model string, prompt string, attachments []Attachment, opts GenerateOptions) (*Response, error) {
 	if model == "" {
 		return nil, ErrEmptyModelName
@@ -76,15 +77,15 @@ func (g *InteractionsGenerator) Generate(ctx context.Context, model string, prom
 		Body: operations.NewCreateInteractionRequestBody(body),
 	}, callOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("モデル %s の Interactions 呼び出しに失敗しました: %w", model, err)
+		return nil, fmt.Errorf("model %s Interactions call failed: %w", model, err)
 	}
 	if resp == nil || resp.Interaction == nil {
-		return nil, &APIResponseError{Reason: ErrEmptyResponse, Message: "Interactions のレスポンスが空でした"}
+		return nil, &APIResponseError{Reason: ErrEmptyResponse, Message: "Interactions response was empty"}
 	}
 	return responseFromInteraction(resp.Interaction)
 }
 
-// buildModelInteraction は Generate の引数を Interactions のリクエスト本文へ写します。
+// buildModelInteraction maps Generate's arguments onto an Interactions request body.
 func buildModelInteraction(model, prompt string, attachments []Attachment, opts GenerateOptions, defaultAudioMIMEType string) (ia.CreateModelInteraction, error) {
 	if err := checkInteractionOptions(opts); err != nil {
 		return ia.CreateModelInteraction{}, err
@@ -121,11 +122,11 @@ func buildModelInteraction(model, prompt string, attachments []Attachment, opts 
 	return body, nil
 }
 
-// checkInteractionOptions は、Interactions に写せない GenerateOptions を弾きます。
+// checkInteractionOptions refuses GenerateOptions that cannot be mapped onto Interactions.
 func checkInteractionOptions(opts GenerateOptions) error {
 	var unsupported []string
-	// Temperature と TopP は Interactions の generation_config にあるものの、SDK で
-	// 非推奨になっているため写しません。
+	// Temperature and TopP exist in Interactions' generation_config, but are deprecated in the
+	// SDK, so they are not mapped.
 	if opts.Temperature != nil || opts.TopP != nil || opts.TopK != nil {
 		unsupported = append(unsupported, "Temperature/TopP/TopK")
 	}
@@ -150,12 +151,12 @@ func checkInteractionOptions(opts GenerateOptions) error {
 	return nil
 }
 
-// interactionInput はプロンプトと添付を Interactions の入力へ写します。
+// interactionInput maps the prompt and attachments onto Interactions input.
 //
-// 添付の扱いは attachmentParts に揃えています（空の添付は落とす、Data と URI は排他、
-// インラインデータには MIME type が必須）。違いは URI にも MIME type が要ることで、
-// Interactions は内容ブロックを種類（画像・音声）ごとに型で分けるため、種類が分からない
-// 参照は組み立てられません。テキストだけの場合は文字列で送ります（公式の例と同じ形）。
+// Attachments are handled the same way as attachmentParts (empty attachments are dropped, Data and
+// URI are mutually exclusive, inline data requires a MIME type). The difference is that a URI also
+// needs a MIME type: Interactions types content blocks by kind (image, audio), so a reference of
+// unknown kind cannot be built. Text alone is sent as a string (the same shape as the official example).
 func interactionInput(prompt string, attachments []Attachment) (ia.InteractionsInput, error) {
 	contents := make([]ia.Content, 0, len(attachments)+1)
 	if prompt != "" {
@@ -187,7 +188,7 @@ func interactionInput(prompt string, attachments []Attachment) (ia.InteractionsI
 	}
 }
 
-// interactionContent は添付 1 件を、MIME type に応じた内容ブロックへ写します。
+// interactionContent maps one attachment onto a content block according to its MIME type.
 func interactionContent(attachment Attachment, field string) (ia.Content, error) {
 	var data, uri *string
 	if attachment.URI != "" {
@@ -198,7 +199,7 @@ func interactionContent(attachment Attachment, field string) (ia.Content, error)
 
 	switch {
 	case attachment.MIMEType == "":
-		return ia.Content{}, fmt.Errorf("%w: %s にMIME typeが設定されていません", ErrInvalidAttachment, field)
+		return ia.Content{}, fmt.Errorf("%w: %s has no MIME type", ErrInvalidAttachment, field)
 	case strings.HasPrefix(attachment.MIMEType, "image/"):
 		return ia.NewContent(ia.ImageContent{
 			Data:     data,
@@ -212,12 +213,12 @@ func interactionContent(attachment Attachment, field string) (ia.Content, error)
 			MimeType: new(ia.AudioContentMimeType(attachment.MIMEType)),
 		}), nil
 	default:
-		return ia.Content{}, fmt.Errorf("%w: %s の MIME type %q は Interactions では送れません（画像と音声のみ）", ErrInvalidAttachment, field, attachment.MIMEType)
+		return ia.Content{}, fmt.Errorf("%w: %s MIME type %q cannot be sent through Interactions (images and audio only)", ErrInvalidAttachment, field, attachment.MIMEType)
 	}
 }
 
-// interactionGenerationConfig は、Interactions の generation_config にあたる項目を写します。
-// 何も指定されていなければ nil を返し、モデルの既定に委ねます。
+// interactionGenerationConfig maps the fields corresponding to Interactions' generation_config.
+// If nothing is specified it returns nil, leaving it to the model's defaults.
 func interactionGenerationConfig(opts GenerateOptions) (*ia.GenerationConfig, error) {
 	cfg := &ia.GenerationConfig{StopSequences: opts.StopSequences}
 	if opts.MaxOutputTokens > 0 {
@@ -237,15 +238,15 @@ func interactionGenerationConfig(opts GenerateOptions) (*ia.GenerationConfig, er
 	return cfg, nil
 }
 
-// interactionSafetySettings は genai の安全設定を Interactions の表記へ写します。
+// interactionSafetySettings maps genai's safety settings onto Interactions' notation.
 //
-// 同じ設定でも表記が違います。genai は "HARM_CATEGORY_HATE_SPEECH" / "BLOCK_ONLY_HIGH"、
-// Interactions は "hate_speech" / "block_only_high" です。NewSafetySettings で組み立てた値を
-// そのまま渡せるよう、ここで変換します。
+// The same setting is spelled differently: genai uses "HARM_CATEGORY_HATE_SPEECH" / "BLOCK_ONLY_HIGH",
+// Interactions uses "hate_speech" / "block_only_high". It converts here so that values built with
+// NewSafetySettings can be passed as is.
 //
-// BLOCK_NONE だけは "off" へ写します。SDK の列挙には block_none がありますが、API は
-// どのカテゴリでも "The value 'block_none' is not supported" で拒否します（2026-10-18 に
-// 実機で確認）。ブロックしないという意図に当たるのは off です。
+// BLOCK_NONE alone is mapped to "off". The SDK's enum has block_none, but the API rejects it for
+// every category with "The value 'block_none' is not supported" (confirmed against the live API on
+// 2026-10-18). The setting that matches the intent of not blocking is off.
 func interactionSafetySettings(settings []*genai.SafetySetting) []ia.SafetySetting {
 	if len(settings) == 0 {
 		return nil
@@ -267,11 +268,11 @@ func interactionSafetySettings(settings []*genai.SafetySetting) []ia.SafetySetti
 	return converted
 }
 
-// responseFromInteraction は Interactions の結果をパッケージ公開型の Response に変換します。
+// responseFromInteraction converts an Interactions result into the package's public Response type.
 //
-// 出力は steps の model_output に内容ブロックとして並びます。Lyria は譜面テキストと音声を
-// 別のステップで返すため、全ステップを順に見てテキストは連結し、データは Attachments に
-// 返却順で積みます。
+// The output is laid out as content blocks in the steps' model_output. Lyria returns the score text
+// and the audio in separate steps, so every step is walked in order, the text is concatenated, and
+// the data is stacked into Attachments in the order returned.
 func responseFromInteraction(it *ia.Interaction) (*Response, error) {
 	if it.Status != ia.InteractionStatusCompleted {
 		return nil, interactionStatusError(it)
@@ -287,7 +288,7 @@ func responseFromInteraction(it *ia.Interaction) (*Response, error) {
 		if output.Error != nil {
 			return nil, &APIResponseError{
 				Reason:  ErrEmptyResponse,
-				Message: "Interactions の出力にエラーが含まれていました: " + statusMessage(output.Error),
+				Message: "Interactions output contained an error: " + statusMessage(output.Error),
 			}
 		}
 		for _, content := range output.Content {
@@ -311,7 +312,7 @@ func responseFromInteraction(it *ia.Interaction) (*Response, error) {
 	}
 
 	if text.Len() == 0 && len(attachments) == 0 {
-		return nil, &APIResponseError{Reason: ErrEmptyResponse, Message: "Interactions のレスポンスに出力がありませんでした"}
+		return nil, &APIResponseError{Reason: ErrEmptyResponse, Message: "Interactions response had no output"}
 	}
 
 	resp := &Response{
@@ -331,8 +332,8 @@ func responseFromInteraction(it *ia.Interaction) (*Response, error) {
 	return resp, nil
 }
 
-// decodeInteractionMedia は内容ブロックのデータ（base64）を Attachment に戻します。
-// URI で返された場合はダウンロードせず、URI のまま渡します。
+// decodeInteractionMedia turns a content block's data (base64) back into an Attachment.
+// If it was returned as a URI, it is passed on as the URI without downloading.
 func decodeInteractionMedia(data, uri, mimeType *string) (Attachment, error) {
 	attachment := Attachment{}
 	if mimeType != nil {
@@ -342,7 +343,7 @@ func decodeInteractionMedia(data, uri, mimeType *string) (Attachment, error) {
 	case data != nil && *data != "":
 		decoded, err := base64.StdEncoding.DecodeString(*data)
 		if err != nil {
-			return Attachment{}, fmt.Errorf("%w: Interactions の出力データを復号できませんでした: %w", ErrEmptyResponse, err)
+			return Attachment{}, fmt.Errorf("%w: could not decode Interactions output data: %w", ErrEmptyResponse, err)
 		}
 		attachment.Data = decoded
 	case uri != nil:
@@ -351,15 +352,16 @@ func decodeInteractionMedia(data, uri, mimeType *string) (Attachment, error) {
 	return attachment, nil
 }
 
-// interactionStatusError は、completed 以外で返った interaction をエラーに分類します。
+// interactionStatusError classifies an interaction returned in a state other than completed as an error.
 //
-// incomplete と budget_exceeded と requires_continuation は上限で打ち切られた途中結果なので
-// ErrTruncated、それ以外（failed・cancelled・未完了のまま返った in_progress など）は使える
-// 出力が無いので ErrEmptyResponse です。
+// incomplete, budget_exceeded and requires_continuation are partial results cut off at a limit, so
+// they are ErrTruncated; anything else (failed, cancelled, in_progress returned unfinished, etc.)
+// has no usable output, so it is ErrEmptyResponse.
 //
-// requires_continuation は 1 リクエストの出力上限で止まった印で、genai v1.77.0 からは SDK が
-// 既定で続きを取り直してつなぐ（自動継続）ため、ここまで届くのは継続しても残った場合だけです。
-// generateContent の CONTINUATION を ErrTruncated にしているのと揃えています。
+// requires_continuation marks a stop at the per-request output limit. Since genai v1.77.0 the SDK
+// fetches the rest and joins it by default (automatic continuation), so it only reaches here when
+// it remains after continuing.
+// This matches treating generateContent's CONTINUATION as ErrTruncated.
 func interactionStatusError(it *ia.Interaction) *APIResponseError {
 	reason := ErrEmptyResponse
 	switch it.Status {
@@ -368,7 +370,7 @@ func interactionStatusError(it *ia.Interaction) *APIResponseError {
 		reason = ErrTruncated
 	}
 
-	message := fmt.Sprintf("Interactions の生成が完了しませんでした（status: %s）", it.Status)
+	message := fmt.Sprintf("Interactions generation did not complete (status: %s)", it.Status)
 	var details []string
 	for _, e := range it.Errors {
 		if e.Message != nil && *e.Message != "" {
@@ -381,7 +383,7 @@ func interactionStatusError(it *ia.Interaction) *APIResponseError {
 	return &APIResponseError{Reason: reason, Message: message}
 }
 
-// statusMessage は Status の説明文を返します。メッセージが無ければコードで代用します。
+// statusMessage returns the description of a Status. If there is no message, the code stands in.
 func statusMessage(s *ia.Status) string {
 	if s.Message != nil && *s.Message != "" {
 		return *s.Message
@@ -389,10 +391,10 @@ func statusMessage(s *ia.Status) string {
 	if s.Code != nil {
 		return fmt.Sprintf("code %d", *s.Code)
 	}
-	return "詳細なし"
+	return "no details"
 }
 
-// tokenUsageFromInteraction は Interactions の使用量を TokenUsage に写します。
+// tokenUsageFromInteraction maps Interactions' usage onto TokenUsage.
 func tokenUsageFromInteraction(u *ia.Usage) *TokenUsage {
 	if u == nil {
 		return nil

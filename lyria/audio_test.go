@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newAudioGenerator は、発射間隔なしの audioGenerator を組み立てます。
+// newAudioGenerator builds an audioGenerator with no firing interval.
 func newAudioGenerator(ai gemini.Generator) *audioGenerator {
 	return &audioGenerator{
 		aiClient:          ai,
@@ -20,8 +20,8 @@ func newAudioGenerator(ai gemini.Generator) *audioGenerator {
 	}
 }
 
-// TestTrackCloneIsIndependent は、複製した Track の書き換えが元へ波及しないことを
-// 検証します。生成結果は singleflight で同時呼び出しの間に共有されます。
+// TestTrackCloneIsIndependent checks that modifying a cloned Track does not spill over to the
+// original. Generation results are shared between concurrent calls through singleflight.
 func TestTrackCloneIsIndependent(t *testing.T) {
 	src := &Track{Audio: []byte{1, 2, 3}, MIMEType: "audio/mpeg", SungLyrics: "sung"}
 
@@ -35,8 +35,8 @@ func TestTrackCloneIsIndependent(t *testing.T) {
 	assert.Nil(t, (*Track)(nil).Clone())
 }
 
-// TestGenerateAudioSendsPromptAndImages は、呼び出し側のプロンプトと画像が
-// そのまま Lyria へ渡ることを検証します。
+// TestGenerateAudioSendsPromptAndImages checks that the caller's prompt and images reach
+// Lyria as is.
 func TestGenerateAudioSendsPromptAndImages(t *testing.T) {
 	ai := audioResponder([]byte{1, 2, 3})
 	g := newAudioGenerator(ai)
@@ -50,21 +50,21 @@ func TestGenerateAudioSendsPromptAndImages(t *testing.T) {
 	call := ai.lastCall(t)
 	assert.Equal(t, "full prompt", call.Prompt)
 	assert.Equal(t, images, call.Attachments)
-	// Lyria はレスポンス MIME type の指定なしで音声を返すため、指定しない。
+	// Lyria returns audio without a response MIME type, so none is specified.
 	assert.Empty(t, call.Opts.ResponseMIMEType)
 	assert.NotEmpty(t, call.Opts.SafetySettings)
 }
 
-// TestGenerateAudioResolvesModel は、呼び出し側が指定するモデルが既定より優先される
-// ことを検証します。
+// TestGenerateAudioResolvesModel checks that a model specified by the caller takes
+// precedence over the default.
 func TestGenerateAudioResolvesModel(t *testing.T) {
 	tests := []struct {
 		name       string
 		audioModel string
 		want       string
 	}{
-		{"未指定なら既定モデル", "", "lyria-3"},
-		{"呼び出し側の指定が優先されること", "lyria-custom", "lyria-custom"},
+		{"default model when unspecified", "", "lyria-3"},
+		{"caller's choice takes precedence", "lyria-custom", "lyria-custom"},
 	}
 
 	for _, tt := range tests {
@@ -80,9 +80,9 @@ func TestGenerateAudioResolvesModel(t *testing.T) {
 	}
 }
 
-// TestGenerateAudioReturnsMIMETypeAndSungLyrics は、レスポンスが載せてきたものが音声バイト列
-// だけでなく呼び出し元へ届くことを検証します。MIME type はバイト列からの推測に頼ることになり
-// （WAV と MP3 は取り違えます）、譜面のテキストに至っては復元する手立てがありません。
+// TestGenerateAudioReturnsMIMETypeAndSungLyrics checks that what the response carried reaches
+// the caller, not just the audio bytes. Otherwise the MIME type would have to be guessed from the
+// bytes (WAV and MP3 get confused), and the score text could not be recovered at all.
 func TestGenerateAudioReturnsMIMETypeAndSungLyrics(t *testing.T) {
 	ai := &fakeGenerator{resp: audioResponse("audio/mpeg", []byte{1, 2, 3}, "[[V1]]\n[:] sung line")}
 	g := newAudioGenerator(ai)
@@ -95,8 +95,8 @@ func TestGenerateAudioReturnsMIMETypeAndSungLyrics(t *testing.T) {
 	assert.Equal(t, "[[V1]]\n[:] sung line", track.SungLyrics)
 }
 
-// TestGenerateAudioPicksTheFirstAudioAttachment は、音声以外の添付が混ざっていても音声だけが
-// 選ばれることを検証します。振り分けを自前でやる以上、ずれると画像を音声として返します。
+// TestGenerateAudioPicksTheFirstAudioAttachment checks that only audio is picked even when
+// non-audio attachments are mixed in. Since the sorting is done here, getting it wrong would return an image as audio.
 func TestGenerateAudioPicksTheFirstAudioAttachment(t *testing.T) {
 	ai := &fakeGenerator{resp: &gemini.Response{
 		Attachments: []gemini.Attachment{
@@ -114,8 +114,8 @@ func TestGenerateAudioPicksTheFirstAudioAttachment(t *testing.T) {
 	assert.Equal(t, "audio/wav", track.MIMEType)
 }
 
-// TestGenerateAudioKeepsSeed は、指定したシードが生成呼び出しへ渡ることを
-// 検証します。落とすと、レシピを保存していても同じ曲を作り直せません。
+// TestGenerateAudioKeepsSeed checks that the specified seed reaches the generation call.
+// If it were dropped, the same song could not be recreated even with the recipe saved.
 func TestGenerateAudioKeepsSeed(t *testing.T) {
 	seed := int64(42)
 	ai := audioResponder([]byte{1})
@@ -137,24 +137,24 @@ func TestGenerateAudioErrorBranches(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:    "AI がエラーを返す",
+			name:    "AI returns an error",
 			ai:      &fakeGenerator{err: errors.New("lyria boom")},
 			wantErr: nil,
 		},
 		{
-			name:    "AI が nil レスポンスを返す",
+			name:    "AI returns a nil response",
 			ai:      &fakeGenerator{},
 			wantErr: ErrNoAudio,
 		},
 		{
-			// 音声生成でテキストだけが返るのは、歌詞は書けたが音を出せなかった場合です。
-			// 空の Track を返すと、呼び出し側が 0 バイトの音声を公開まで運びます。
-			name:    "音声が 1 件も含まれない",
-			ai:      &fakeGenerator{resp: &gemini.Response{Text: "説明だけ"}},
+			// Audio generation returning only text is the case where the lyrics could be written but no sound produced.
+			// Returning an empty Track would let the caller carry 0 bytes of audio all the way to publishing.
+			name:    "no audio at all",
+			ai:      &fakeGenerator{resp: &gemini.Response{Text: "description only"}},
 			wantErr: ErrNoAudio,
 		},
 		{
-			name:    "音声以外の添付しかない",
+			name:    "only non-audio attachments",
 			ai:      &fakeGenerator{resp: &gemini.Response{Attachments: []gemini.Attachment{{MIMEType: "image/png", Data: []byte("cover")}}}},
 			wantErr: ErrNoAudio,
 		},
@@ -182,11 +182,11 @@ func TestGenerateAudioRejectsEmptyPrompt(t *testing.T) {
 	_, err := g.GenerateAudio(context.Background(), AudioRequest{})
 
 	assert.ErrorIs(t, err, ErrNilInput)
-	assert.Zero(t, ai.callCount(), "空のプロンプトで Lyria を呼んでいます")
+	assert.Zero(t, ai.callCount(), "Lyria was called with an empty prompt")
 }
 
-// TestGenerateAudioDeduplicatesConcurrentCalls は、同一内容の同時呼び出しが 1 回に
-// まとまり、それでも各呼び出し元が独立したバイト列を受け取ることを検証します。
+// TestGenerateAudioDeduplicatesConcurrentCalls checks that concurrent calls with the same content
+// collapse into one, while each caller still receives independent bytes.
 func TestGenerateAudioDeduplicatesConcurrentCalls(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
@@ -211,23 +211,23 @@ func TestGenerateAudioDeduplicatesConcurrentCalls(t *testing.T) {
 		close(release)
 		wg.Wait()
 
-		require.Equal(t, 1, ai.callCount(), "同一内容の同時呼び出しがまとめられていません")
+		require.Equal(t, 1, ai.callCount(), "concurrent calls with the same content were not collapsed")
 		for _, err := range errs {
 			require.NoError(t, err)
 		}
 
-		// 共有結果ではなく複製が返っていること。
+		// A copy is returned, not the shared result.
 		require.NotSame(t, results[0], results[1])
 		results[0].Audio[0] = 9
-		assert.Equal(t, byte(1), results[1].Audio[0], "音声のバイト列が共有されています")
-		// 音声と一緒に返ったテキストは全員へ届く。
+		assert.Equal(t, byte(1), results[1].Audio[0], "the audio bytes are shared")
+		// The text returned with the audio reaches everyone.
 		assert.Equal(t, "sung lyrics", results[1].SungLyrics)
 	})
 }
 
-// TestGenerateAudioSeparatesDifferentImages は、画像が違う呼び出しが相乗りしない
-// ことを検証します。画像は結果を変えるので、キーに含めないと片方の画像で作った
-// 音声がもう片方へ返ります。
+// TestGenerateAudioSeparatesDifferentImages checks that calls with different images do not
+// share a call. Images change the result, so if they were not in the key, audio made with one
+// image would be returned to the other.
 func TestGenerateAudioSeparatesDifferentImages(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
@@ -246,23 +246,23 @@ func TestGenerateAudioSeparatesDifferentImages(t *testing.T) {
 			})
 		}
 
-		// 両方が in-flight に入るまで待つ。相乗りしていなければ呼び出しは 2 回になる。
+		// Wait until both are in flight. If they did not share a call, there are two calls.
 		synctest.Wait()
 		got := ai.callCount()
 
 		close(release)
 		wg.Wait()
 
-		assert.Equal(t, 2, got, "画像違いが 1 回の生成結果を共有しています")
+		assert.Equal(t, 2, got, "calls with different images share one generation result")
 		for _, err := range errs {
 			require.NoError(t, err)
 		}
 	})
 }
 
-// TestImagesHashIgnoresEmptyPayloads は、空の画像がキーに影響しないことを
-// 検証します。呼び出し側は画像を「あれば渡す」形で組み立てるため、空要素の
-// 有無でキーが変わると重複排除が効かなくなります。
+// TestImagesHashIgnoresEmptyPayloads checks that empty images do not affect the key.
+// Callers build images as "pass it if there is one", so if the presence of empty elements
+// changed the key, deduplication would stop working.
 func TestImagesHashIgnoresEmptyPayloads(t *testing.T) {
 	filled := []ImagePayload{{Data: []byte("cover"), MIMEType: "image/png"}}
 	withEmpty := []ImagePayload{
@@ -275,8 +275,8 @@ func TestImagesHashIgnoresEmptyPayloads(t *testing.T) {
 	assert.Equal(t, imagesHash(nil), imagesHash([]ImagePayload{}))
 }
 
-// TestImagesHashDistinguishesContentAndType は、バイト列と MIME type のどちらが
-// 違ってもキーが変わることを検証します。
+// TestImagesHashDistinguishesContentAndType checks that the key changes when either the bytes
+// or the MIME type differ.
 func TestImagesHashDistinguishesContentAndType(t *testing.T) {
 	base := []ImagePayload{{Data: []byte("cover"), MIMEType: "image/png"}}
 	otherData := []ImagePayload{{Data: []byte("other"), MIMEType: "image/png"}}

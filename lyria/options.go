@@ -15,61 +15,61 @@ type options struct {
 	audioGenerator   gemini.Generator
 }
 
-// Option は Workflow の構築時設定です。
+// Option is a construction-time setting for Workflow.
 type Option func(*options)
 
-// WithGeminiModel は、歌詞生成とレシピ生成に使うモデルを指定します。
+// WithGeminiModel specifies the model used for lyrics generation and recipe generation.
 func WithGeminiModel(value string) Option {
 	return func(opts *options) {
 		opts.geminiModel = value
 	}
 }
 
-// WithLyriaModel は、音声生成に使うモデルを指定します。
+// WithLyriaModel specifies the model used for audio generation.
 func WithLyriaModel(value string) Option {
 	return func(opts *options) {
 		opts.lyriaModel = value
 	}
 }
 
-// WithAudioGenerator は、音声生成（Lyria）にだけ使う生成クライアントを差し替えます。
-// 未指定なら New に渡した aiClient を作詞・作曲と共用します。
+// WithAudioGenerator replaces the generation client used only for audio generation (Lyria).
+// If unspecified, the aiClient passed to New is shared with lyrics and composition.
 //
-// generateContent では Lyria の出力形式を選べないため、音声だけを Interactions の経路へ
-// 逃がすための口です。WAV が欲しい場合は gemini.Client.Interactions で作った生成器を
-// 渡します:
+// generateContent cannot choose Lyria's output format, so this is the hook for diverting audio
+// alone onto the Interactions path. If you want WAV, pass a generator made with
+// gemini.Client.Interactions:
 //
 //	lyria.WithAudioGenerator(client.Interactions(gemini.InteractionsConfig{AudioMIMEType: "audio/wav"}))
 //
-// 差し替え点をここ（gemini.Generator）に置くのは、
-// Workflow・Track・呼び出しガード・プロンプト構築をそのまま使い回し、戻すときは
-// このオプションを外すだけにするためです。
+// The replacement point is placed here (gemini.Generator) so that the Workflow, Track, call
+// guard and prompt construction are all reused as is, and reverting is just a matter of
+// removing this option.
 func WithAudioGenerator(g gemini.Generator) Option {
 	return func(opts *options) {
 		opts.audioGenerator = g
 	}
 }
 
-// WithRateInterval は、音声生成の発射間隔を指定します。未設定なら制限しません。
+// WithRateInterval specifies the firing interval for audio generation. If unset, there is no limit.
 func WithRateInterval(value time.Duration) Option {
 	return func(opts *options) {
 		opts.rateInterval = value
 	}
 }
 
-// WithTextRateInterval は、歌詞・レシピ生成（テキスト）の発射間隔を指定します。
-// 未設定なら制限しません。音声側と別に持つのは、別のモデルの別のクォータだからです。
+// WithTextRateInterval specifies the firing interval for lyrics and recipe generation (text).
+// If unset, there is no limit. It is kept separate from audio because it is a different quota of a different model.
 func WithTextRateInterval(value time.Duration) Option {
 	return func(opts *options) {
 		opts.textRateInterval = value
 	}
 }
 
-// WithExecTimeout は、singleflight で共有される生成呼び出し 1 回あたりの上限時間です。
-// 共有実行は呼び出し元の context から切り離されるため、これが唯一の打ち切り手段に
-// なります。未設定なら callguard.DefaultExecTimeout です。
+// WithExecTimeout is the time limit for one generation call shared through singleflight.
+// A shared execution is detached from the caller's context, so this is the only way to cut it
+// off. If unset, callguard.DefaultExecTimeout applies.
 //
-// 発射間隔の待機はこの時間に数えません（callguard.Do を参照）。
+// Waiting for the firing interval is not counted in this time (see callguard.Do).
 func WithExecTimeout(value time.Duration) Option {
 	return func(opts *options) {
 		opts.execTimeout = value
@@ -86,23 +86,23 @@ func applyOptions(overrides ...Option) options {
 	return opts
 }
 
-// jsonOptions は Gemini による JSON 形式の構造化データ生成に最適化されたオプションを返します。
-// schema を指定すると構造化出力（constrained decoding）が有効になり、出力が文法レベルで制約されます。
+// jsonOptions returns options optimised for generating structured JSON data with Gemini.
+// Specifying schema enables structured output (constrained decoding), constraining the output at the grammar level.
 func jsonOptions(seed *int64, schema *gemini.Schema) gemini.GenerateOptions {
 	opts := baseOptions(seed, "application/json")
 	opts.ResponseSchema = schema
 	return opts
 }
 
-// audioOptions は Lyria による音声生成に最適化されたオプションを返します。
-// Lyria モデルはレスポンス MIME type の指定なしで音声を返すため、指定しません。
+// audioOptions returns options optimised for audio generation with Lyria.
+// Lyria models return audio without a response MIME type, so none is specified.
 func audioOptions(seed *int64) gemini.GenerateOptions {
 	return baseOptions(seed, "")
 }
 
-// baseOptions はパッケージ共通の安全設定やシード値を適用したベースオプションを構築します。
-// NOTE: 生成結果の再現性を優先するため、対応カテゴリのブロック閾値は BlockNone に統一しています。
-// 入力・出力の制御は呼び出し側または後段処理で行う前提です。
+// baseOptions builds base options with the package-wide safety settings and seed applied.
+// NOTE: to favour reproducible generation, the block threshold of every supported category is set to BlockNone.
+// Controlling input and output is assumed to be done by the caller or a later stage.
 func baseOptions(seed *int64, mimeType string) gemini.GenerateOptions {
 	opts := gemini.GenerateOptions{
 		SafetySettings: gemini.NewSafetySettings(gemini.SafetyBlockNone),

@@ -7,85 +7,85 @@ import (
 	"google.golang.org/genai"
 )
 
-// 入力検証エラー。
+// Input validation errors.
 //
-// センチネルの文言は英語 + "gemini: " プレフィックスで統一しています。深いラップの
-// 中に埋まってもどのパッケージ由来か判別できるようにするためで、人間向けの文脈は
-// ラップする側（fmt.Errorf の %w）が日本語で補います。
+// Sentinel text is English with a "gemini: " prefix. That way the originating package can
+// be told even when the error is buried deep in a wrap; human-facing context is added by the
+// wrapping side (fmt.Errorf with %w).
 var (
-	// ErrEmptyPrompt は、プロンプトが空の場合に返されます。
+	// ErrEmptyPrompt is returned when the prompt is empty.
 	ErrEmptyPrompt = errors.New("gemini: prompt is empty")
-	// ErrEmptyModelName は、モデル名が空の場合に返されます。
+	// ErrEmptyModelName is returned when the model name is empty.
 	ErrEmptyModelName = errors.New("gemini: model name is empty")
-	// ErrEmptyParts は、生成パーツが空の場合に返されます。
+	// ErrEmptyParts is returned when the generation parts are empty.
 	ErrEmptyParts = errors.New("gemini: generation parts are empty")
-	// ErrInvalidPart は、生成パーツに nil が含まれる場合に返されます。
+	// ErrInvalidPart is returned when the generation parts contain nil.
 	ErrInvalidPart = errors.New("gemini: generation parts must not contain nil")
-	// ErrInvalidSeed は、Seed が int32 の範囲外の場合に返されます。
+	// ErrInvalidSeed is returned when Seed is outside the int32 range.
 	ErrInvalidSeed = errors.New("gemini: seed must fit in int32")
-	// ErrInvalidAttachment は、添付の指定が不正な場合に返されます。
-	// Data と URI の併用、および Data に MIME type が無い場合が該当します。
+	// ErrInvalidAttachment is returned when an attachment is specified incorrectly.
+	// This covers setting both Data and URI, and Data without a MIME type.
 	ErrInvalidAttachment = errors.New("gemini: invalid attachment")
-	// ErrEmptyOperationName は、オペレーション名が空の場合に返されます。
+	// ErrEmptyOperationName is returned when the operation name is empty.
 	ErrEmptyOperationName = errors.New("gemini: operation name is empty")
-	// ErrInvalidVideoInput は、動画生成の入力の組み合わせが API の受け付けない
-	// ものだった場合に返されます（Image と Video の併用など）。
+	// ErrInvalidVideoInput is returned when the combination of video generation inputs
+	// is one the API does not accept (such as Image together with Video).
 	ErrInvalidVideoInput = errors.New("gemini: invalid video generation input")
-	// ErrUnsupportedOption は、InteractionsGenerator が Interactions へ写せない
-	// GenerateOptions を受け取った場合に返されます。黙って落とすと、指定したつもりの
-	// 設定が効かないまま生成が課金されるため、送る前に止めます。
+	// ErrUnsupportedOption is returned when InteractionsGenerator receives GenerateOptions
+	// that cannot be mapped onto Interactions. Dropping them silently would bill a generation
+	// with a setting the caller thought was applied having no effect, so it stops before sending.
 	ErrUnsupportedOption = errors.New("gemini: option not supported by interactions")
-	// ErrInvalidOutputURIPrefix は、GenerateOptions.OutputURIPrefix が gs:// で
-	// 始まっていない場合に返されます。API が書き込み先として受け付けるのは GCS だけです。
+	// ErrInvalidOutputURIPrefix is returned when GenerateOptions.OutputURIPrefix does not
+	// start with gs://. GCS is the only destination the API accepts.
 	ErrInvalidOutputURIPrefix = errors.New("gemini: output URI prefix must be a gs:// URI")
 )
 
-// ErrVideoGenerationFailed は、動画生成のオペレーションが失敗として完了したことを
-// 示します。オペレーションの取得自体は成功しているため、通信エラーとは区別されます。
-// VideoOperation.Failure に載る形で返されます。
+// ErrVideoGenerationFailed indicates that a video generation operation completed as a
+// failure. Fetching the operation itself succeeded, so it is distinct from a transport error.
+// It is returned on VideoOperation.Failure.
 var ErrVideoGenerationFailed = errors.New("gemini: video generation failed")
 
-// API との通信は成功したが、レスポンス内容が利用できない場合のセンチネルエラー。
-// いずれも HTTP としては 200 なので、SDK 内蔵のリトライの対象にもなりません。
+// Sentinel errors for when communication with the API succeeded but the response content is unusable.
+// All of them are HTTP 200, so they are not covered by the SDK's built-in retries either.
 var (
-	// ErrBlocked は、安全フィルタ等により生成がブロックされたことを示します。
-	// プロンプトを変えない限り再試行しても同じ結果になります。
-	// 詳細な理由は errors.AsType[*APIResponseError] で参照してください。入力そのものが
-	// 弾かれた場合は BlockReason に、生成の途中で止められた場合は FinishReason に入ります。
+	// ErrBlocked indicates that generation was blocked, by a safety filter or the like.
+	// Unless the prompt changes, retrying gives the same result.
+	// See errors.AsType[*APIResponseError] for the detailed reason. When the input itself was
+	// refused it is in BlockReason; when generation was stopped midway it is in FinishReason.
 	ErrBlocked = errors.New("gemini: generation blocked")
 
-	// ErrTruncated は、出力トークンの上限（MAX_TOKENS）で生成が打ち切られたか、
-	// 継続トークン付きの途中結果（CONTINUATION）のまま返されたことを示します。
-	// ブロックとは対処が違います。プロンプトではなく MaxOutputTokens を上げるか、
-	// 出力を短くする指示を足します。返った本文は途中までなので、そのまま使えません。
+	// ErrTruncated indicates that generation was cut off at the output token limit (MAX_TOKENS),
+	// or was returned as a partial result awaiting a continuation token (CONTINUATION).
+	// The remedy differs from a block: rather than changing the prompt, raise MaxOutputTokens
+	// or add an instruction to shorten the output. The returned body is incomplete and cannot be used as is.
 	ErrTruncated = errors.New("gemini: generation truncated")
 
-	// ErrEmptyResponse は、候補が 1 件も含まれず、入力がブロックされたわけでもない
-	// レスポンスが返されたことを示します（DecodeJSON では本文が空のときも）。
+	// ErrEmptyResponse indicates that a response came back with no candidates at all, without the
+	// input having been blocked (in DecodeJSON, also when the body is empty).
 	ErrEmptyResponse = errors.New("gemini: empty response")
 )
 
-// APIResponseError は、コンテンツのブロックや空のレスポンスなど、
-// API との通信成功後に発生した論理的なエラーを示します。
+// APIResponseError represents a logical error that occurred after communication with the API
+// succeeded, such as blocked content or an empty response.
 //
-// errors.Is により ErrBlocked / ErrEmptyResponse のいずれかと比較できます。
+// It can be compared with ErrBlocked / ErrEmptyResponse via errors.Is.
 //
 //	if errors.Is(err, gemini.ErrBlocked) {
-//	    // プロンプトを見直す
+//	    // revise the prompt
 //	}
 //	if apiErr, ok := errors.AsType[*gemini.APIResponseError](err); ok {
 //	    slog.Warn("blocked", "reason", apiErr.FinishReason)
 //	}
 type APIResponseError struct {
-	// Reason は分類用のセンチネル（ErrBlocked / ErrTruncated / ErrEmptyResponse）です。
+	// Reason is the sentinel used for classification (ErrBlocked / ErrTruncated / ErrEmptyResponse).
 	Reason error
-	// FinishReason は、生成の途中で止められたときにモデルが返した終了理由です。
-	// 入力がブロックされた場合や空レスポンスでは、ゼロ値（空文字列）になります。
+	// FinishReason is the finish reason the model returned when generation was stopped midway.
+	// When the input was blocked or the response is empty, it is the zero value (empty string).
 	FinishReason genai.FinishReason
-	// BlockReason は、入力（プロンプト）そのものが弾かれたときの理由です。
-	// この場合は候補が 1 件も返らず、FinishReason はゼロ値です。
+	// BlockReason is the reason the input (prompt) itself was refused.
+	// In that case no candidates are returned and FinishReason is the zero value.
 	BlockReason genai.BlockedReason
-	// Message は人間向けの説明です。
+	// Message is a human-readable description.
 	Message string
 }
 
@@ -94,7 +94,7 @@ func (e *APIResponseError) Error() string {
 		return e.Message
 	}
 	if !isUnsetFinishReason(e.FinishReason) {
-		return fmt.Sprintf("生成がブロックされました（理由: %v）", e.FinishReason)
+		return fmt.Sprintf("generation was blocked (reason: %v)", e.FinishReason)
 	}
 	if e.Reason != nil {
 		return e.Reason.Error()
@@ -102,61 +102,62 @@ func (e *APIResponseError) Error() string {
 	return "gemini: API response error"
 }
 
-// Unwrap は分類用センチネルを返し、errors.Is による判定を可能にします。
+// Unwrap returns the classification sentinel, enabling classification with errors.Is.
 func (e *APIResponseError) Unwrap() error { return e.Reason }
 
-// isUnsetFinishReason は、終了理由が「設定されていない」かを判定します。
+// isUnsetFinishReason reports whether the finish reason is "not set".
 //
-// genai.FinishReason は文字列型で、Go のゼロ値は "" ですが、SDK 定数の
-// FinishReasonUnspecified は "FINISH_REASON_UNSPECIFIED" という別の値です。
-// サーバーは終了理由を含まないレスポンスを返すことがあり、そのときゼロ値になるため、
-// 両方を「未設定」として扱わないと正常な応答をブロック扱いに誤判定します。
+// genai.FinishReason is a string type whose Go zero value is "", but the SDK constant
+// FinishReasonUnspecified is a different value, "FINISH_REASON_UNSPECIFIED".
+// The server sometimes returns a response with no finish reason, which yields the zero value,
+// so unless both are treated as "unset", a normal response is misjudged as blocked.
 func isUnsetFinishReason(r genai.FinishReason) bool {
 	return r == "" || r == genai.FinishReasonUnspecified
 }
 
-// isBlockedFinishReason は、終了理由が異常終了（ブロック等）を示すかを判定します。
-// MAX_TOKENS と CONTINUATION もここでは真です。分類の切り分けは newFinishReasonError が行います。
+// isBlockedFinishReason reports whether the finish reason indicates an abnormal end (a block, etc.).
+// MAX_TOKENS and CONTINUATION are true here too; newFinishReasonError does the classification split.
 func isBlockedFinishReason(r genai.FinishReason) bool {
 	return !isUnsetFinishReason(r) && r != genai.FinishReasonStop
 }
 
-// newFinishReasonError は、異常な終了理由をエラーに分類します。
+// newFinishReasonError classifies an abnormal finish reason as an error.
 //
-// MAX_TOKENS と CONTINUATION は ErrTruncated です。安全フィルタと同じ「ブロック」に混ぜると、
-// 対処（プロンプトを直す / 出力上限を上げる）が違うのに通知の見出しが同じになります。
-// CONTINUATION は genai v1.74.0 以降 SDK が自動継続で消化するため、ここに届くのは
-// AutomaticContinuation を切った場合か、継続後も途中結果が残った場合だけです。
-// どちらも本文は途中までで、ブロックではありません。
-// 継続の途中の回が弾かれた場合は SDK が CONTINUATION を消すので、ここではなく
-// extractText の PromptFeedback 判定で ErrBlocked になります。
+// MAX_TOKENS and CONTINUATION are ErrTruncated. Mixing them into the same "blocked" as safety
+// filters would give the notification the same heading even though the remedy (fix the prompt /
+// raise the output limit) differs.
+// Since genai v1.74.0 the SDK consumes CONTINUATION through automatic continuation, so it only
+// reaches here when AutomaticContinuation is off, or when a partial result remains after continuing.
+// Either way the body is incomplete, and it is not a block.
+// When a hop in the middle of a continuation is refused, the SDK clears CONTINUATION, so it
+// becomes ErrBlocked through extractText's PromptFeedback check rather than here.
 func newFinishReasonError(reason genai.FinishReason) *APIResponseError {
 	switch reason {
 	case genai.FinishReasonMaxTokens:
 		return &APIResponseError{
 			Reason:       ErrTruncated,
 			FinishReason: reason,
-			Message:      "生成が出力トークンの上限で打ち切られました（理由: MAX_TOKENS）",
+			Message:      "generation was cut off at the output token limit (reason: MAX_TOKENS)",
 		}
 	case genai.FinishReasonContinuation:
 		return &APIResponseError{
 			Reason:       ErrTruncated,
 			FinishReason: reason,
-			Message:      "生成が継続待ちの途中結果のまま返されました（理由: CONTINUATION）",
+			Message:      "generation was returned as a partial result awaiting continuation (reason: CONTINUATION)",
 		}
 	}
 	return &APIResponseError{
 		Reason:       ErrBlocked,
 		FinishReason: reason,
-		Message:      fmt.Sprintf("生成がブロックされました（理由: %v）", reason),
+		Message:      fmt.Sprintf("generation was blocked (reason: %v)", reason),
 	}
 }
 
-// newPromptBlockedError は、入力そのものが弾かれたときのエラーを生成します。
-// 候補が 0 件で PromptFeedback.BlockReason が付いている形で、これを見ないと
-// 「空のレスポンス」として理由なしに報告され、再試行しても無駄なことが伝わりません。
+// newPromptBlockedError builds the error for when the input itself was refused.
+// It arrives as zero candidates with PromptFeedback.BlockReason set; without looking at it, the
+// failure is reported as an "empty response" with no reason, and it is not conveyed that retrying is pointless.
 func newPromptBlockedError(feedback *genai.GenerateContentResponsePromptFeedback) *APIResponseError {
-	msg := fmt.Sprintf("入力がブロックされました（理由: %v）", feedback.BlockReason)
+	msg := fmt.Sprintf("input was blocked (reason: %v)", feedback.BlockReason)
 	if feedback.BlockReasonMessage != "" {
 		msg += ": " + feedback.BlockReasonMessage
 	}
@@ -167,15 +168,15 @@ func newPromptBlockedError(feedback *genai.GenerateContentResponsePromptFeedback
 	}
 }
 
-// isPromptBlocked は、入力がブロックされたことを PromptFeedback が示しているかを返します。
+// isPromptBlocked reports whether PromptFeedback indicates that the input was blocked.
 func isPromptBlocked(feedback *genai.GenerateContentResponsePromptFeedback) bool {
 	return feedback != nil && feedback.BlockReason != "" && feedback.BlockReason != genai.BlockedReasonUnspecified
 }
 
-// newEmptyResponseError は空レスポンスエラーを生成します。
+// newEmptyResponseError builds an empty-response error.
 func newEmptyResponseError() *APIResponseError {
 	return &APIResponseError{
 		Reason:  ErrEmptyResponse,
-		Message: "Vertex AI から空のレスポンスが返されました",
+		Message: "Vertex AI returned an empty response",
 	}
 }

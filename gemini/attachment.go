@@ -6,51 +6,51 @@ import (
 	"google.golang.org/genai"
 )
 
-// Attachment は、プロンプトに添えるバイナリ入力 1 件です。
+// Attachment is one binary input attached to a prompt.
 //
-// 画像・音声・PDF など、モデルへインラインで渡すデータを表します。genai.Part や genai.Blob を
-// 組み立てる代わりにこれを使うことで、呼び出し側は genai SDK を import せずに済みます。
-// マルチモーダル入力は「MIME type とバイト列」以上の情報を必要としないため、SDK の
-// 型をそのまま外へ出す理由がありません。
+// It represents data passed inline to the model, such as images, audio or PDFs. Using it instead
+// of building genai.Part or genai.Blob lets callers avoid importing the genai SDK.
+// Multimodal input needs nothing beyond "a MIME type and bytes", so there is no reason to
+// expose the SDK's types.
 type Attachment struct {
-	// MIMEType は "image/png"、"audio/mpeg" のようなデータの種別です。
-	// Data を送る場合は必須、URI を参照する場合は任意で、省略するとサーバー側の判定に委ねます。
+	// MIMEType is the kind of data, such as "image/png" or "audio/mpeg".
+	// Required when sending Data; optional when referencing a URI, in which case omitting it leaves the decision to the server.
 	MIMEType string
-	// Data はインラインで送るバイト列です。URI とは排他です。
+	// Data is the bytes sent inline. Mutually exclusive with URI.
 	Data []byte
-	// URI は、バイト列を送る代わりに参照するファイルの場所です。Data とは排他です。
-	// Vertex AI では GCS の gs:// URI を直接参照できます。
+	// URI is the location of a file referenced instead of sending bytes. Mutually exclusive with Data.
+	// On Vertex AI, a GCS gs:// URI can be referenced directly.
 	//
-	// 同じ画像を何度も送るより URI で参照するほうがリクエストが軽くなります。
-	// この使い分けは呼び出し側の事情なので、どちらも同じ Attachment で表せるように
-	// しています。
+	// Referencing by URI keeps the request lighter than sending the same image over and over.
+	// Which to use depends on the caller's circumstances, so both can be expressed with the
+	// same Attachment.
 	URI string
 }
 
-// IsEmpty は、送るものが何も無い添付かどうかを返します。
+// IsEmpty reports whether the attachment has nothing to send.
 func (a Attachment) IsEmpty() bool {
 	return len(a.Data) == 0 && a.URI == ""
 }
 
-// validateSource は、データの指定方法（Data / URI）が排他になっているかを検証します。
-// field は、どの入力が不正だったかをエラーで示すためのラベルです。
+// validateSource checks that the ways of specifying the data (Data / URI) are mutually exclusive.
+// field is a label that shows in the error which input was invalid.
 //
-// sentinel を引数で受けるのは、同じ「Data と URI の併用」でも呼び出し側から見た
-// 分類が異なるためです（生成の入力なら ErrInvalidAttachment、動画生成の入力なら
-// ErrInvalidVideoInput）。errors.Is での判定を経路ごとに保ったまま、文言と条件を
-// 1か所にまとめています。
+// sentinel is taken as an argument because the same "Data together with URI" is classified
+// differently from the caller's point of view (ErrInvalidAttachment for generation input,
+// ErrInvalidVideoInput for video generation input). The wording and the condition are kept
+// in one place while classification with errors.Is is preserved per path.
 func (a Attachment) validateSource(sentinel error, field string) error {
 	if len(a.Data) > 0 && a.URI != "" {
-		return fmt.Errorf("%w: %s は Data と URI のどちらか一方だけを設定してください", sentinel, field)
+		return fmt.Errorf("%w: %s must set exactly one of Data and URI", sentinel, field)
 	}
 	return nil
 }
 
-// attachmentParts は、プロンプトと添付を genai の Part スライスへ変換します。
+// attachmentParts converts the prompt and attachments into a slice of genai Parts.
 //
-// データが空の添付を落とすのは、画像を「あれば渡す」形で組み立てる呼び出し側が
-// 空要素の除去を毎回書かずに済むようにするためです。落とした結果 Part が 1 つも
-// 残らない場合は、空リクエストを送らずにエラーにします。
+// Attachments with empty data are dropped so that callers building images as "pass it if
+// there is one" do not have to strip empty elements every time. If no Part remains after
+// dropping, it returns an error rather than sending an empty request.
 func attachmentParts(prompt string, attachments []Attachment) ([]*genai.Part, error) {
 	parts := make([]*genai.Part, 0, len(attachments)+1)
 	if prompt != "" {
@@ -65,8 +65,8 @@ func attachmentParts(prompt string, attachments []Attachment) ([]*genai.Part, er
 			return nil, err
 		}
 
-		// URI 参照は MIME type を省ける。拡張子から推測できない URL に誤った型を申告すると
-		// サーバー側のデコードが失敗しうるため、判定を委ねられる余地を残す。
+		// A URI reference can omit the MIME type. Declaring the wrong type for a URL whose type cannot
+		// be guessed from its extension can make decoding fail on the server, so leave room to defer to it.
 		if attachment.URI != "" {
 			parts = append(parts, &genai.Part{
 				FileData: &genai.FileData{FileURI: attachment.URI, MIMEType: attachment.MIMEType},
@@ -75,7 +75,7 @@ func attachmentParts(prompt string, attachments []Attachment) ([]*genai.Part, er
 		}
 
 		if attachment.MIMEType == "" {
-			return nil, fmt.Errorf("%w: attachments[%d] にMIME typeが設定されていません", ErrInvalidAttachment, i)
+			return nil, fmt.Errorf("%w: attachments[%d] has no MIME type", ErrInvalidAttachment, i)
 		}
 		parts = append(parts, &genai.Part{
 			InlineData: &genai.Blob{MIMEType: attachment.MIMEType, Data: attachment.Data},

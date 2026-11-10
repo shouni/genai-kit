@@ -13,16 +13,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// このパッケージのテストダブルは手書きです。注入している口はどれもメソッドが
-// 1〜2 個しかないため、生成ライブラリを挟むより素直な構造体のほうが短く書けます。
-// メソッド名を文字列で指定する仕組みだと、gemini 側の改名がコンパイルではなく
-// 実行時（期待の不一致）に露見するという実害もあります。
+// This package's test doubles are hand-written. Every injected interface has only one or two
+// methods, so plain structs are shorter than going through a mocking library. With a mechanism
+// that names methods by string, a rename on the gemini side would also surface at run time
+// (as an expectation mismatch) rather than at compile time, which is a real cost.
 var (
 	_ gemini.Generator  = (*fakeGenerator)(nil)
 	_ TextPromptBuilder = (*stubTextPrompts)(nil)
 )
 
-// generateCall は fakeGenerator が受け取った 1 回分の呼び出しです。
+// generateCall is one call received by fakeGenerator.
 type generateCall struct {
 	Model       string
 	Prompt      string
@@ -30,18 +30,18 @@ type generateCall struct {
 	Opts        gemini.GenerateOptions
 }
 
-// fakeGenerator は gemini.Generator のテストダブルです。
+// fakeGenerator is a test double for gemini.Generator.
 type fakeGenerator struct {
 	mu    sync.Mutex
 	calls []generateCall
 
-	// respond が非 nil ならそれを使い、無ければ resp / err をそのまま返します。
+	// If respond is non-nil it is used; otherwise resp / err are returned as is.
 	respond func(call generateCall) (*gemini.Response, error)
 	resp    *gemini.Response
 	err     error
 
-	// block が非 nil なら、応答を返す前にこのチャネルが閉じるのを待ちます。
-	// singleflight の合流を作るために使います。
+	// If block is non-nil, it waits for this channel to close before responding.
+	// Used to make callers join in singleflight.
 	block chan struct{}
 }
 
@@ -68,30 +68,30 @@ func (f *fakeGenerator) callCount() int {
 	return len(f.calls)
 }
 
-// lastCall は直近の呼び出しを返します。1 度も呼ばれていなければテストを失敗させます。
+// lastCall returns the most recent call. If it was never called, the test fails.
 func (f *fakeGenerator) lastCall(t *testing.T) generateCall {
 	t.Helper()
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	require.NotEmpty(t, f.calls, "AI が 1 度も呼ばれていません")
+	require.NotEmpty(t, f.calls, "the AI was never called")
 	return f.calls[len(f.calls)-1]
 }
 
-// textResponder は、テキスト生成の応答を返す fakeGenerator を作ります。
+// textResponder builds a fakeGenerator that returns a text generation response.
 func textResponder(text string) *fakeGenerator {
 	return &fakeGenerator{resp: &gemini.Response{Text: text}}
 }
 
-// audioResponder は、音声を返す fakeGenerator を作ります。
+// audioResponder builds a fakeGenerator that returns audio.
 func audioResponder(audio []byte) *fakeGenerator {
 	return &fakeGenerator{resp: audioResponse("audio/mpeg", audio, "")}
 }
 
-// audioResponse は、Lyria の音声レスポンスをテスト用に組み立てます。
+// audioResponse builds a Lyria audio response for tests.
 //
-// Attachments と Audios を両方埋めるのは gemini 側の変換がそう作るためです。Audios だけの
-// レスポンスは実際には返らないので、それを模したフェイクでは MIME type の経路を検証できません。
+// Both Attachments and Audios are filled because the gemini-side conversion builds them that way. A
+// response with only Audios never actually comes back, so a fake imitating one could not test the MIME type path.
 func audioResponse(mimeType string, audio []byte, text string) *gemini.Response {
 	return &gemini.Response{
 		Text:        text,
@@ -100,11 +100,11 @@ func audioResponse(mimeType string, audio []byte, text string) *gemini.Response 
 	}
 }
 
-// stubTextPrompts は TextPromptBuilder のテストダブルです。
-// 受け取った mode と入力を記録し、固定のプロンプト（またはエラー）を返します。
+// stubTextPrompts is a test double for TextPromptBuilder.
+// It records the mode and input it received and returns a fixed prompt (or error).
 //
-// 記録に mutex を掛けているのは、重複排除のテストが同じスタブを複数のゴルーチンから
-// 呼ぶためです（記録の読み出しは合流後なので素の参照で構いません）。
+// The record is guarded by a mutex because the deduplication test calls the same stub from several
+// goroutines (reading the record happens after they join, so a plain read is fine).
 type stubTextPrompts struct {
 	lyricsPrompt string
 	recipePrompt string
@@ -136,8 +136,8 @@ func (s *stubTextPrompts) RecipePrompt(mode string, lyrics *LyricsDraft) (string
 
 const validLyricsJSON = `{"title":"t","theme":"th","hook":"h","lyrics":"l"}`
 
-// newTestWorkflow は、モデル名を埋めた最小構成の Workflow を作ります。
-// 発射間隔は既定で 0（制限なし）です。
+// newTestWorkflow builds a minimal Workflow with the model names filled in.
+// The firing interval defaults to 0 (no limit).
 func newTestWorkflow(t *testing.T, ai gemini.Generator, text TextPromptBuilder, extra ...Option) *Workflow {
 	t.Helper()
 
@@ -147,8 +147,8 @@ func newTestWorkflow(t *testing.T, ai gemini.Generator, text TextPromptBuilder, 
 	return w
 }
 
-// TestNewRequiresDependenciesAndModels は、依存とモデル名の欠落を構築時に弾くことを
-// 検証します。モデル名に既定値を持たないのは、選択が品質とコストを直接決めるためです。
+// TestNewRequiresDependenciesAndModels checks that missing dependencies and model names are refused
+// at construction. Model names have no defaults because the choice directly determines quality and cost.
 func TestNewRequiresDependenciesAndModels(t *testing.T) {
 	ai := &fakeGenerator{}
 	text := &stubTextPrompts{}
@@ -159,10 +159,10 @@ func TestNewRequiresDependenciesAndModels(t *testing.T) {
 		text TextPromptBuilder
 		opts []Option
 	}{
-		{"aiClient が nil", nil, text, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
-		{"textPrompts が nil", ai, nil, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
-		{"GeminiModel が未指定", ai, text, []Option{WithLyriaModel("l")}},
-		{"LyriaModel が未指定", ai, text, []Option{WithGeminiModel("g")}},
+		{"aiClient is nil", nil, text, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
+		{"textPrompts is nil", ai, nil, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
+		{"GeminiModel is unspecified", ai, text, []Option{WithLyriaModel("l")}},
+		{"LyriaModel is unspecified", ai, text, []Option{WithGeminiModel("g")}},
 	}
 
 	for _, tt := range tests {
@@ -174,7 +174,7 @@ func TestNewRequiresDependenciesAndModels(t *testing.T) {
 		})
 	}
 
-	t.Run("すべて揃っていれば成功する", func(t *testing.T) {
+	t.Run("succeeds when everything is present", func(t *testing.T) {
 		w, err := New(ai, text, WithGeminiModel("g"), WithLyriaModel("l"))
 
 		require.NoError(t, err)
@@ -182,8 +182,8 @@ func TestNewRequiresDependenciesAndModels(t *testing.T) {
 	})
 }
 
-// TestNewIgnoresNilOption は、nil の Option を渡しても落ちないことを検証します。
-// 条件付きでオプションを組み立てる呼び出し側が、分岐を書かずに済みます。
+// TestNewIgnoresNilOption checks that passing a nil Option does not crash.
+// Callers that build options conditionally need not write branches.
 func TestNewIgnoresNilOption(t *testing.T) {
 	_, err := New(&fakeGenerator{}, &stubTextPrompts{},
 		WithGeminiModel("g"), nil, WithLyriaModel("l"))
@@ -191,12 +191,12 @@ func TestNewIgnoresNilOption(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestWorkflowDelegatesToEachRole は、ファサードの 3 メソッドがそれぞれの役割へ
-// 委譲され、テキストは Gemini、音声は Lyria のモデルに向かうことを検証します。
+// TestWorkflowDelegatesToEachRole checks that the facade's three methods delegate to their
+// respective roles, with text going to the Gemini model and audio to the Lyria model.
 func TestWorkflowDelegatesToEachRole(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("歌詞生成は Gemini モデルへ", func(t *testing.T) {
+	t.Run("lyrics generation goes to the Gemini model", func(t *testing.T) {
 		ai := textResponder(validLyricsJSON)
 		w := newTestWorkflow(t, ai, &stubTextPrompts{lyricsPrompt: "lyrics prompt"})
 
@@ -207,7 +207,7 @@ func TestWorkflowDelegatesToEachRole(t *testing.T) {
 		assert.Equal(t, "gemini-flash", ai.lastCall(t).Model)
 	})
 
-	t.Run("作曲は Gemini モデルへ", func(t *testing.T) {
+	t.Run("composition goes to the Gemini model", func(t *testing.T) {
 		ai := textResponder(`{"title":"Song","tempo":120}`)
 		w := newTestWorkflow(t, ai, &stubTextPrompts{recipePrompt: "recipe prompt"})
 
@@ -218,7 +218,7 @@ func TestWorkflowDelegatesToEachRole(t *testing.T) {
 		assert.Equal(t, "gemini-flash", ai.lastCall(t).Model)
 	})
 
-	t.Run("音声生成は Lyria モデルへ", func(t *testing.T) {
+	t.Run("audio generation goes to the Lyria model", func(t *testing.T) {
 		ai := audioResponder([]byte{1, 2, 3})
 		w := newTestWorkflow(t, ai, &stubTextPrompts{})
 
@@ -233,15 +233,15 @@ func TestWorkflowDelegatesToEachRole(t *testing.T) {
 	})
 }
 
-// TestNewRoutesAudioToAudioGenerator は、WithAudioGenerator を渡すと音声生成だけがそちらへ
-// 行き、作詞・作曲は従来どおり aiClient へ行くことを検証します。
+// TestNewRoutesAudioToAudioGenerator checks that passing WithAudioGenerator sends only audio
+// generation there, while lyrics and composition still go to aiClient.
 //
-// 音声を REST 直叩きの実装へ逃がしている間、テキスト側まで巻き込まないための切り分けです。
-// 未指定なら両方とも aiClient に戻る（差し替えを外すだけで元に戻る）ことも同時に見ます。
+// This separation keeps the text side out of it while audio is diverted to a direct REST implementation.
+// It also checks that when unspecified both go back to aiClient (removing the replacement restores the original).
 func TestNewRoutesAudioToAudioGenerator(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("指定すれば音声だけがそちらへ行くこと", func(t *testing.T) {
+	t.Run("only audio goes there when specified", func(t *testing.T) {
 		text := textResponder(validLyricsJSON)
 		audioAI := audioResponder([]byte{1, 2, 3})
 		w := newTestWorkflow(t, text, &stubTextPrompts{lyricsPrompt: "p"},
@@ -252,13 +252,13 @@ func TestNewRoutesAudioToAudioGenerator(t *testing.T) {
 		track, err := w.GenerateAudio(ctx, AudioRequest{Prompt: "full prompt"})
 		require.NoError(t, err)
 
-		assert.Equal(t, 1, text.callCount(), "作詞は aiClient へ")
-		assert.Equal(t, 1, audioAI.callCount(), "音声は WithAudioGenerator へ")
+		assert.Equal(t, 1, text.callCount(), "lyrics go to aiClient")
+		assert.Equal(t, 1, audioAI.callCount(), "audio goes to WithAudioGenerator")
 		assert.Equal(t, "lyria-3", audioAI.lastCall(t).Model)
 		assert.Equal(t, []byte{1, 2, 3}, track.Audio)
 	})
 
-	t.Run("未指定なら両方とも aiClient へ行くこと", func(t *testing.T) {
+	t.Run("both go to aiClient when unspecified", func(t *testing.T) {
 		ai := &fakeGenerator{respond: func(call generateCall) (*gemini.Response, error) {
 			if call.Model == "lyria-3" {
 				return audioResponse("audio/mpeg", []byte{1}, ""), nil
@@ -276,14 +276,14 @@ func TestNewRoutesAudioToAudioGenerator(t *testing.T) {
 	})
 }
 
-// TestTextAndAudioHaveSeparateRateGuards は、テキストと音声の発射間隔が独立して
-// いることを検証します。別のモデルの別のクォータなので、片方の混雑でもう片方を
-// 絞る理由がありません。共有していると、待たされない側まで待たされます。
+// TestTextAndAudioHaveSeparateRateGuards checks that the firing intervals for text and audio are
+// independent. They are different quotas of different models, so there is no reason to throttle
+// one when the other is busy. If they were shared, the side that need not wait would be kept waiting too.
 func TestTextAndAudioHaveSeparateRateGuards(t *testing.T) {
 	const textInterval = 50 * time.Millisecond
 	const audioInterval = 30 * time.Second
 
-	t.Run("テキストの発射間隔が音声側に影響しないこと", func(t *testing.T) {
+	t.Run("the text firing interval does not affect audio", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			ai := &fakeGenerator{respond: func(call generateCall) (*gemini.Response, error) {
 				if call.Model == "lyria-3" {
@@ -301,18 +301,18 @@ func TestTextAndAudioHaveSeparateRateGuards(t *testing.T) {
 			_, err = w.GenerateLyrics(ctx, AIModels{}, &CollectedContent{Prompt: "second"})
 			require.NoError(t, err)
 
-			// 仮想時計なので、待たされた時間は設定値ちょうどに一致する。
-			require.Equal(t, textInterval, time.Since(start), "2 回目のテキスト生成は発射間隔ぶん待つはずです")
+			// With the virtual clock, the time waited exactly matches the configured value.
+			require.Equal(t, textInterval, time.Since(start), "the second text generation should wait one firing interval")
 
-			// 音声側は制限なしなので、テキスト側の混雑に引きずられない。
+			// Audio has no limit, so it is not dragged down by congestion on the text side.
 			beforeAudio := time.Now()
 			_, err = w.GenerateAudio(ctx, AudioRequest{Prompt: "full prompt"})
 			require.NoError(t, err)
-			assert.Zero(t, time.Since(beforeAudio), "音声生成がテキスト側の発射間隔に巻き込まれています")
+			assert.Zero(t, time.Since(beforeAudio), "audio generation is caught up in the text firing interval")
 		})
 	})
 
-	t.Run("音声の発射間隔がテキスト側に影響しないこと", func(t *testing.T) {
+	t.Run("the audio firing interval does not affect text", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			ai := &fakeGenerator{respond: func(call generateCall) (*gemini.Response, error) {
 				if call.Model == "lyria-3" {
@@ -324,21 +324,21 @@ func TestTextAndAudioHaveSeparateRateGuards(t *testing.T) {
 				WithRateInterval(audioInterval), WithTextRateInterval(0))
 
 			ctx := context.Background()
-			// 音声側の枠を 1 つ使っておく。
+			// Use up one slot on the audio side.
 			_, err := w.GenerateAudio(ctx, AudioRequest{Prompt: "full prompt"})
 			require.NoError(t, err)
 
 			start := time.Now()
 			_, err = w.GenerateLyrics(ctx, AIModels{}, &CollectedContent{Prompt: "first"})
 			require.NoError(t, err)
-			assert.Zero(t, time.Since(start), "テキスト生成が音声側の発射間隔に巻き込まれています")
+			assert.Zero(t, time.Since(start), "text generation is caught up in the audio firing interval")
 		})
 	})
 }
 
-// TestWorkflowPropagatesRoleErrors は、各段の失敗がファサードを素通りして
-// 呼び出し側へ届くことを検証します。段の間に品質ゲートを挟むのは呼び出し側なので、
-// ここで握り潰されると判断材料が消えます。
+// TestWorkflowPropagatesRoleErrors checks that each stage's failure passes straight through the
+// facade to the caller. It is the caller that places quality gates between stages, so swallowing
+// the failure here would remove what it bases its decision on.
 func TestWorkflowPropagatesRoleErrors(t *testing.T) {
 	ctx := context.Background()
 	sentinel := errors.New("ai boom")

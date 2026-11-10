@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// TestRecipeJSONWireFormat は、レシピ JSON のワイヤ形式が変わっていないことを
-// 検証します。下流サービスはこの形式で GCS にレシピを永続化しているため、
-// キー名の変化はデータ互換性の破壊になります。
+// TestRecipeJSONWireFormat checks that the recipe JSON wire format has not changed.
+// Downstream services persist recipes to GCS in this format, so a change in key names
+// breaks data compatibility.
 func TestRecipeJSONWireFormat(t *testing.T) {
 	seed := int64(42)
 	r := Recipe{
@@ -40,33 +40,33 @@ func TestRecipeJSONWireFormat(t *testing.T) {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
 
-	// 埋め込みの AIModels はトップレベルへ平坦化される（別オブジェクトにしない）。
+	// The embedded AIModels is flattened to the top level (not a separate object).
 	for _, key := range []string{
 		"title", "theme", "mood", "tempo", "key", "vocal_profile",
 		"instruments", "sections", "lyrics",
 		"text_model", "audio_model", "seed", "lang",
 	} {
 		if _, ok := raw[key]; !ok {
-			t.Errorf("キー %q がありません（ワイヤ形式が変わっています）: %s", key, data)
+			t.Errorf("key %q is missing (the wire format has changed): %s", key, data)
 		}
 	}
 	if _, nested := raw["AIModels"]; nested {
-		t.Errorf("AIModels が入れ子のオブジェクトになっています: %s", data)
+		t.Errorf("AIModels has become a nested object: %s", data)
 	}
 
 	section := raw["sections"].([]any)[0].(map[string]any)
 	for _, key := range []string{"name", "duration_seconds", "start_seconds", "end_seconds", "prompt"} {
 		if _, ok := section[key]; !ok {
-			t.Errorf("セクションのキー %q がありません: %s", key, data)
+			t.Errorf("section key %q is missing: %s", key, data)
 		}
 	}
 
 	var back Recipe
 	if err := json.Unmarshal(data, &back); err != nil {
-		t.Fatalf("往復の Unmarshal() error = %v", err)
+		t.Fatalf("round-trip Unmarshal() error = %v", err)
 	}
 	if back.Title != r.Title || back.Seed == nil || *back.Seed != seed || len(back.Sections) != 1 {
-		t.Errorf("往復で値が変わりました: %+v", back)
+		t.Errorf("the value changed in the round trip: %+v", back)
 	}
 }
 
@@ -87,22 +87,22 @@ func TestRecipeCloneIsDeep(t *testing.T) {
 
 	if cloned.Instruments[0] != "synth" || cloned.Sections[0].Name != "Verse" ||
 		cloned.Lyrics.Keywords[0] != "one" || *cloned.Seed != 7 {
-		t.Errorf("Clone() が浅いコピーになっています: %+v", cloned)
+		t.Errorf("Clone() made a shallow copy: %+v", cloned)
 	}
 }
 
-// TestRecipeCloneKeepsSliceShape は、複製がスライスの nil と空を取り違えないことを
-// 検証します。Instruments と Sections には omitempty が無いため、空スライスが nil へ
-// 化けると保存済みレシピの JSON が [] から null に変わります。
+// TestRecipeCloneKeepsSliceShape checks that a copy does not confuse nil and empty slices.
+// Instruments and Sections have no omitempty, so if an empty slice turned into nil, a stored
+// recipe's JSON would change from [] to null.
 func TestRecipeCloneKeepsSliceShape(t *testing.T) {
 	filled := &Recipe{Instruments: []string{}, Sections: []Section{}}
 	if got := filled.Clone(); got.Instruments == nil || got.Sections == nil {
-		t.Errorf("空スライスが nil になりました: %+v", got)
+		t.Errorf("an empty slice became nil: %+v", got)
 	}
 
 	var empty Recipe
 	if got := empty.Clone(); got.Instruments != nil || got.Sections != nil {
-		t.Errorf("nil スライスが空スライスになりました: %+v", got)
+		t.Errorf("a nil slice became an empty slice: %+v", got)
 	}
 }
 
@@ -125,13 +125,13 @@ func TestLyricsDraftCloneIsDeep(t *testing.T) {
 	src.Keywords[0] = "changed"
 
 	if cloned.Keywords[0] != "one" {
-		t.Errorf("Clone() が浅いコピーになっています: %+v", cloned)
+		t.Errorf("Clone() made a shallow copy: %+v", cloned)
 	}
 }
 
-// TestIsJapanese は、Lang 未指定を日本語扱いにすることを検証します。
-// 既存のレシピは Lang を持たないため、未指定が英語扱いになると読み仮名変換が
-// 黙って外れます。
+// TestIsJapanese checks that an unspecified Lang is treated as Japanese.
+// Existing recipes have no Lang, so if unspecified were treated as English, the reading
+// conversion would silently stop applying.
 func TestIsJapanese(t *testing.T) {
 	tests := []struct {
 		lang string

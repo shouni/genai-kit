@@ -8,11 +8,11 @@ import (
 	"google.golang.org/genai/interactions/models/operations"
 )
 
-// SDK との境界（modelClient / videoClient）に差し込むテストダブルです。
+// Test doubles plugged into the boundary with the SDK (modelClient / videoClient).
 //
-// この 2 つの seam があるおかげで、GCP 認証も HTTP も無しにこのパッケージの
-// 変換・検証・抽出を丸ごと動かせます。フェイクを 1 か所へ集めているのは、
-// 同じ形のスタブがテストごとに少しずつ違う形で増えるのを防ぐためです。
+// These two seams let this package's conversion, validation and extraction run in full
+// with neither GCP credentials nor HTTP. The fakes are gathered in one place to keep
+// stubs of the same shape from multiplying in slightly different forms across tests.
 var (
 	_ modelClient = (*fakeModelClient)(nil)
 	_ modelClient = (*slowModelClient)(nil)
@@ -21,7 +21,7 @@ var (
 	_ interactionClient = (*fakeInteractionClient)(nil)
 )
 
-// fakeInteractionClient は Interactions 呼び出しのテストダブルで、送られたリクエストを記録します。
+// fakeInteractionClient is a test double for Interactions calls; it records the requests sent.
 type fakeInteractionClient struct {
 	calls   int
 	gotReq  operations.CreateInteractionRequest
@@ -41,14 +41,14 @@ func (f *fakeInteractionClient) Create(_ context.Context, request operations.Cre
 	return f.resp, nil
 }
 
-// fakeModelClient は生成呼び出しのテストダブルで、SDK へ渡された引数を記録します。
+// fakeModelClient is a test double for generation calls; it records the arguments passed to the SDK.
 type fakeModelClient struct {
 	calls       int
 	gotModel    string
 	gotConfig   *genai.GenerateContentConfig
 	gotContents []*genai.Content
 
-	// resp が nil なら、テキスト "ok" を返す既定のレスポンスを組み立てます。
+	// If resp is nil, a default response returning the text "ok" is built.
 	resp *genai.GenerateContentResponse
 	err  error
 }
@@ -68,7 +68,7 @@ func (f *fakeModelClient) GenerateContent(_ context.Context, model string, conte
 	return respWithParts(genai.FinishReasonStop, &genai.Part{Text: "ok"}), nil
 }
 
-// slowModelClient は RequestTimeout の検証用に、context の期限まで応答しないフェイクです。
+// slowModelClient is a fake that does not respond until the context deadline, for testing RequestTimeout.
 type slowModelClient struct {
 	delay time.Duration
 }
@@ -82,7 +82,7 @@ func (s *slowModelClient) GenerateContent(ctx context.Context, _ string, _ []*ge
 	}
 }
 
-// fakeVideoClient は動画生成のテストダブルで、SDK へ渡された引数を記録します。
+// fakeVideoClient is a test double for video generation; it records the arguments passed to the SDK.
 type fakeVideoClient struct {
 	calls         int
 	gotModel      string
@@ -91,7 +91,7 @@ type fakeVideoClient struct {
 	gotPollOp     *genai.GenerateVideosOperation
 	gotPollConfig *genai.GetOperationConfig
 
-	// startOp が nil なら、未完了のオペレーション "operations/abc" を返します。
+	// If startOp is nil, an unfinished operation "operations/abc" is returned.
 	startOp  *genai.GenerateVideosOperation
 	startErr error
 	pollOp   *genai.GenerateVideosOperation
@@ -117,7 +117,7 @@ func (f *fakeVideoClient) GetVideosOperation(_ context.Context, operation *genai
 	return f.pollOp, f.pollErr
 }
 
-// respWithParts は、1 候補だけを持つ生成レスポンスを組み立てます。
+// respWithParts builds a generation response with a single candidate.
 func respWithParts(reason genai.FinishReason, parts ...*genai.Part) *genai.GenerateContentResponse {
 	return &genai.GenerateContentResponse{
 		Candidates: []*genai.Candidate{

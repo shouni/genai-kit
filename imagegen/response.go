@@ -6,47 +6,47 @@ import (
 	"github.com/shouni/genai-kit/gemini"
 )
 
-// Response は生成された画像データとそのメタデータです。
+// Response is the generated image data and its metadata.
 type Response struct {
-	// Data は生成画像のバイト列です。OutputURIPrefix を指定した場合は空で、URI に
-	// 書き込み先が入ります。
+	// Data is the bytes of the generated image. When OutputURIPrefix is specified it is empty,
+	// and URI holds the destination instead.
 	Data []byte
-	// URI は、OutputURIPrefix を指定したときに API が画像を書き込んだ gs:// URI です。
-	// 指定しなければ空で、Data に画像が入ります。
+	// URI is the gs:// URI the API wrote the image to when OutputURIPrefix was specified.
+	// If not specified it is empty, and Data holds the image.
 	URI      string
 	MIMEType string
-	// UsedSeed はリクエストで指定した（または自動採番された）シードです。
-	// API はレスポンスにシードを返さないため、これは送信値の記録です。
+	// UsedSeed is the seed specified in the request (or picked automatically).
+	// The API does not return the seed in the response, so this is a record of the value sent.
 	UsedSeed int64
-	// Model は生成に使ったモデル名です。コスト集計やメタデータ保存のために、
-	// 呼び出し側がリクエストから別途持ち回らずに済むよう応答へ含めます。
+	// Model is the model name used for generation. It is included in the response so that callers
+	// do not have to carry it separately from the request for cost accounting or metadata storage.
 	Model string
-	// Prompt は実際に送信した最終プロンプト（ネガティブプロンプト結合済み）です。
+	// Prompt is the final prompt actually sent (with the negative prompt joined in).
 	Prompt string
-	// Usage はトークン使用量です。モデルが返さない場合は nil です。
+	// Usage is the token usage. It is nil when the model does not return it.
 	Usage *gemini.TokenUsage
 }
 
-// toResponse はレスポンスから画像データを抽出します。
+// toResponse extracts the image data from the response.
 //
-// FinishReason の検証（安全フィルタによるブロック等）は gemini が行い、ブロック時は
-// 生成呼び出し自体がエラーを返すため、ここでは行いません。このパッケージが区別するのは
-// 「画像データが無い」ことだけです。
+// Checking FinishReason (blocks by a safety filter, etc.) is done by gemini, and on a block the
+// generation call itself returns an error, so it is not done here. The only thing this package
+// distinguishes is "no image data".
 func (p preparedRequest) toResponse(resp *gemini.Response) (*Response, error) {
 	if resp == nil {
 		return nil, fmt.Errorf("%w: no response", ErrNoImageData)
 	}
 
-	// gemini.Response.Attachments は MIME type 込みで返るため、保存時の Content-Type を
-	// 決めるために生の SDK レスポンスを辿る必要はありません。
+	// gemini.Response.Attachments come back with their MIME type, so there is no need to walk the
+	// raw SDK response to decide the Content-Type when saving.
 	for _, attachment := range resp.Attachments {
 		if attachment.IsEmpty() {
 			continue
 		}
 		mimeType := attachment.MIMEType
 		if mimeType == "" && attachment.URI != "" {
-			// サーバーが型を添えなかった場合だけ、書き込み先の拡張子から補う。
-			// 分からなければ空のまま返す（理由は mimeTypeByPath を参照）。
+			// Only when the server did not attach a type, fill it in from the destination's extension.
+			// If that is unknown too, return it empty (see mimeTypeByPath for why).
 			mimeType = mimeTypeByPath(attachment.URI)
 		}
 		return &Response{

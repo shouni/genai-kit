@@ -1,15 +1,15 @@
-// Package gemini は、Vertex AI 向けの genai SDK をラップし、
-// リトライ設定とレスポンス抽出を備えたクライアントを提供します。
+// Package gemini wraps the genai SDK for Vertex AI and provides a client
+// with retry settings and response extraction.
 //
-// バックエンドは Vertex AI です。認証は Application Default Credentials (ADC) に
-// 従い、Config には ProjectID と LocationID を渡します。Config.APIKey を指定した
-// 場合だけ Gemini API (Google AI Studio) へ切り替わりますが、これは Vertex AI に
-// 無いモデルのための暫定的な例外です（Config.APIKey を参照）。
+// The backend is Vertex AI. Authentication follows Application Default Credentials (ADC),
+// and Config takes ProjectID and LocationID. Only when Config.APIKey is set does it switch
+// to the Gemini API (Google AI Studio), a temporary exception for models that are not on
+// Vertex AI (see Config.APIKey).
 //
-// 公開 API に genai の型は現れません。設定値の型と定数は別名として再エクスポート
-// してあるため（ThinkingLevel / SafetyThreshold / Schema / SchemaType /
-// VideoReferenceType）、値を選ぶためだけに genai SDK を import する必要はありません。
-// 別名なので、genai の値をそのまま渡しても構いません。
+// No genai types appear in the public API. Configuration value types and constants are
+// re-exported as aliases (ThinkingLevel / SafetyThreshold / Schema / SchemaType /
+// VideoReferenceType), so there is no need to import the genai SDK just to pick a value.
+// Because they are aliases, genai values can also be passed as is.
 package gemini
 
 import (
@@ -21,30 +21,30 @@ import (
 	"google.golang.org/genai/interactions/retry"
 )
 
-// Client がパッケージ公開インターフェースを満たすことをコンパイル時に保証します。
-// これらのアサーションがないと、Client のメソッドシグネチャがドリフトしても
-// 下流の利用側がビルドされるまで気付けません。
+// These assertions guarantee at compile time that Client satisfies the package's public interfaces.
+// Without them, a drifting Client method signature would go unnoticed until a downstream
+// caller is built.
 var (
 	_ Generator      = (*Client)(nil)
 	_ VideoGenerator = (*Client)(nil)
 )
 
-// Client は Gemini SDK をラップしたメイン構造体です。
+// Client is the main struct wrapping the Gemini SDK.
 type Client struct {
 	modelClient       modelClient
 	videoClient       videoClient
 	interactionClient interactionClient
-	// interactionRetries は Interactions の呼び出しに渡すリトライ設定です。
-	// Interactions は genai の HTTPRetryOptions を読まないため、Config から別に組み立てます。
+	// interactionRetries is the retry configuration passed to Interactions calls.
+	// Interactions does not read genai's HTTPRetryOptions, so it is built separately from Config.
 	interactionRetries *retry.Config
 	requestTimeout     time.Duration
-	// backendName はエラー文に載せる経路名です（"Vertex AI" / "Gemini API"）。
-	// 402 のような課金のエラーは経路で原因が違うため、取り違えないように書き分けます。
+	// backendName is the path name put in error messages ("Vertex AI" / "Gemini API").
+	// Billing errors such as 402 have different causes depending on the path, so they are named apart.
 	backendName string
 }
 
-// New は提供された設定に基づいて、新しいクライアントを作成します。
-// バックエンドは Config が決めます（既定は Vertex AI）。
+// New creates a new client based on the provided configuration.
+// Config decides the backend (Vertex AI by default).
 func New(ctx context.Context, cfg Config) (*Client, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	}
 	client, err := genai.NewClient(ctx, clientCfg)
 	if err != nil {
-		return nil, fmt.Errorf("gemini: クライアントの作成に失敗しました: %w", err)
+		return nil, fmt.Errorf("gemini: failed to create client: %w", err)
 	}
 
 	return &Client{
@@ -69,14 +69,14 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	}, nil
 }
 
-// requestContext は Config.RequestTimeout を適用した context を返します。
-// 未設定（0）の場合は呼び出し元の context をそのまま使います。
+// requestContext returns a context with Config.RequestTimeout applied.
+// If unset (0), the caller's context is used as is.
 func (c *Client) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return withRequestTimeout(ctx, c.requestTimeout)
 }
 
-// backend はエラー文に載せる経路名を返します。New を通らずに組み立てた Client（テスト）でも
-// 文が崩れないよう、未設定なら既定の Vertex AI とします。
+// backend returns the path name put in error messages. It defaults to Vertex AI when unset, so the
+// message does not break for a Client built without going through New (tests).
 func (c *Client) backend() string {
 	if c.backendName == "" {
 		return "Vertex AI"
@@ -84,7 +84,7 @@ func (c *Client) backend() string {
 	return c.backendName
 }
 
-// withRequestTimeout は timeout が正の値のときだけ期限を付けた context を返します。
+// withRequestTimeout returns a context with a deadline only when timeout is positive.
 func withRequestTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if timeout <= 0 {
 		return ctx, func() {}
