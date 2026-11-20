@@ -121,6 +121,9 @@ func (c Config) usesAPIKey() bool {
 func (c Config) toClientConfig() (*genai.ClientConfig, error) {
 	cc := &genai.ClientConfig{}
 	cc.HTTPOptions.RetryOptions = c.retryOptions()
+	// The API version is left to genai: since v1.78.0 the API-key backend defaults to v1 (it was
+	// v1beta) and Vertex AI stays on v1beta1. A caller that needs a v1beta-only model or feature
+	// sets GOOGLE_GENAI_API_VERSION=beta in its environment instead of a code change here.
 	if c.usesAPIKey() {
 		cc.APIKey = c.APIKey
 		cc.Backend = genai.BackendGeminiAPI
