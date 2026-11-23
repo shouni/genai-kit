@@ -38,6 +38,10 @@ type CollectedContent struct {
 
 const defaultComposeMode = "default"
 
+// errNoTextPrompts is returned by the mode-based entry points of a Workflow built without a
+// TextPromptBuilder. Such a Workflow serves the FromPrompt entry points only.
+var errNoTextPrompts = fmt.Errorf("%w: no TextPromptBuilder was given to New; use the FromPrompt entry points", ErrWorkflowConfig)
+
 // textGenerator handles both lyrics generation and song recipe generation with Gemini.
 type textGenerator struct {
 	aiClient     gemini.Generator
@@ -91,9 +95,27 @@ func (g *textGenerator) GenerateLyrics(ctx context.Context, ai AIModels, input *
 		return nil, fmt.Errorf("%w: collected content", ErrNilInput)
 	}
 
+	if g.prompts == nil {
+		return nil, errNoTextPrompts
+	}
+
 	promptText, err := g.prompts.LyricsPrompt(ai.LyricsMode, input.Prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build lyrics prompt: %w", err)
+	}
+	return g.GenerateLyricsFromPrompt(ctx, ai, promptText)
+}
+
+// GenerateLyricsFromPrompt generates a lyrics draft from a prompt the caller assembled.
+//
+// It is the text counterpart of AudioRequest: how the prompt is assembled is caller policy, and a
+// TextPromptBuilder is handed only a mode name and one input string. A caller whose prompt
+// depends on more than that (the target model, the number of singers, a per-job list) had to
+// build one Workflow per combination, or smuggle the data through the input string. ai supplies
+// the model and the seed; its LyricsMode is not read here.
+func (g *textGenerator) GenerateLyricsFromPrompt(ctx context.Context, ai AIModels, promptText string) (*LyricsDraft, error) {
+	if strings.TrimSpace(promptText) == "" {
+		return nil, fmt.Errorf("%w: lyrics prompt", ErrNilInput)
 	}
 
 	lyrics, err := g.generateJSON[LyricsDraft](ctx, "lyrics", g.resolveModel(ai.TextModel), promptText, ai.Seed, lyricsDraftSchema())
@@ -118,9 +140,28 @@ func (g *textGenerator) Compose(ctx context.Context, ai AIModels, lyrics *Lyrics
 		targetMode = defaultComposeMode
 	}
 
+	if g.prompts == nil {
+		return nil, errNoTextPrompts
+	}
+
 	promptText, err := g.prompts.RecipePrompt(targetMode, lyrics)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build prompt (mode: %s): %w", targetMode, err)
+	}
+	return g.ComposeFromPrompt(ctx, ai, promptText, lyrics)
+}
+
+// ComposeFromPrompt generates a song recipe from a prompt the caller assembled.
+//
+// See GenerateLyricsFromPrompt for why it exists. lyrics is not sent anywhere by this method (the
+// caller has already written it into the prompt); it is attached to the recipe, as Compose does.
+// ai supplies the model and the seed and is recorded on the recipe; its ComposeMode is not read here.
+func (g *textGenerator) ComposeFromPrompt(ctx context.Context, ai AIModels, promptText string, lyrics *LyricsDraft) (*MusicRecipe, error) {
+	if lyrics == nil {
+		return nil, fmt.Errorf("%w: lyrics draft", ErrNilInput)
+	}
+	if strings.TrimSpace(promptText) == "" {
+		return nil, fmt.Errorf("%w: compose prompt", ErrNilInput)
 	}
 
 	shared, err := g.generateJSON[MusicRecipe](ctx, "compose", g.resolveModel(ai.TextModel), promptText, ai.Seed, musicRecipeSchema())

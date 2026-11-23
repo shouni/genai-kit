@@ -160,7 +160,6 @@ func TestNewRequiresDependenciesAndModels(t *testing.T) {
 		opts []Option
 	}{
 		{"aiClient is nil", nil, text, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
-		{"textPrompts is nil", ai, nil, []Option{WithGeminiModel("g"), WithLyriaModel("l")}},
 		{"GeminiModel is unspecified", ai, text, []Option{WithLyriaModel("l")}},
 		{"LyriaModel is unspecified", ai, text, []Option{WithGeminiModel("g")}},
 	}
@@ -180,6 +179,65 @@ func TestNewRequiresDependenciesAndModels(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, w)
 	})
+}
+
+// TestWorkflowWithoutTextPromptsServesOnlyAssembledPrompts checks that a Workflow built with a nil
+// TextPromptBuilder generates from caller-assembled prompts and refuses the mode-based entry points.
+//
+// A caller whose prompts depend on more than a mode name assembles them itself. If nil were refused at
+// construction it would have to pass a builder that is never called; if the mode-based entry points
+// dereferenced nil, a wiring mistake would be a panic in the middle of a job.
+func TestWorkflowWithoutTextPromptsServesOnlyAssembledPrompts(t *testing.T) {
+	seed := int64(7)
+	ai := textResponder(validLyricsJSON)
+	w, err := New(ai, nil, WithGeminiModel("g"), WithLyriaModel("l"))
+	require.NoError(t, err)
+
+	models := AIModels{LyricsMode: "ignored", ComposeMode: "ignored", Seed: &seed}
+
+	lyrics, err := w.GenerateLyricsFromPrompt(context.Background(), models, "assembled lyrics prompt")
+	require.NoError(t, err)
+	call := ai.lastCall(t)
+	assert.Equal(t, "assembled lyrics prompt", call.Prompt, "the prompt must be sent as given")
+	assert.Equal(t, "g", call.Model)
+	if assert.NotNil(t, call.Opts.Seed) {
+		assert.Equal(t, seed, *call.Opts.Seed)
+	}
+
+	composeAI := textResponder(`{"title":"t","tempo":120}`)
+	composer, err := New(composeAI, nil, WithGeminiModel("g"), WithLyriaModel("l"))
+	require.NoError(t, err)
+	recipe, err := composer.ComposeFromPrompt(context.Background(), models, "assembled compose prompt", lyrics)
+	require.NoError(t, err)
+	assert.Equal(t, "assembled compose prompt", composeAI.lastCall(t).Prompt)
+	// The recipe carries the lyrics and the models, exactly as Compose attaches them.
+	require.NotNil(t, recipe.Lyrics)
+	assert.Equal(t, lyrics.Lyrics, recipe.Lyrics.Lyrics)
+	assert.Equal(t, "ignored", recipe.ComposeMode)
+	if assert.NotNil(t, recipe.Seed) {
+		assert.Equal(t, seed, *recipe.Seed)
+	}
+
+	_, err = w.GenerateLyrics(context.Background(), models, &CollectedContent{Prompt: "x"})
+	require.ErrorIs(t, err, ErrWorkflowConfig)
+	_, err = w.Compose(context.Background(), models, lyrics)
+	require.ErrorIs(t, err, ErrWorkflowConfig)
+}
+
+// TestFromPromptRejectsEmptyInput checks that an empty prompt and a nil lyrics draft are refused
+// before the model is called, as GenerateAudio refuses an empty prompt.
+func TestFromPromptRejectsEmptyInput(t *testing.T) {
+	ai := textResponder(validLyricsJSON)
+	w, err := New(ai, nil, WithGeminiModel("g"), WithLyriaModel("l"))
+	require.NoError(t, err)
+
+	_, err = w.GenerateLyricsFromPrompt(context.Background(), AIModels{}, "  ")
+	require.ErrorIs(t, err, ErrNilInput)
+	_, err = w.ComposeFromPrompt(context.Background(), AIModels{}, "", &LyricsDraft{Lyrics: "la"})
+	require.ErrorIs(t, err, ErrNilInput)
+	_, err = w.ComposeFromPrompt(context.Background(), AIModels{}, "prompt", nil)
+	require.ErrorIs(t, err, ErrNilInput)
+	assert.Empty(t, ai.calls, "nothing may reach the model")
 }
 
 // TestNewIgnoresNilOption checks that passing a nil Option does not crash.

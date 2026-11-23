@@ -59,7 +59,8 @@ godoc を読んでも気付けないことだけです。
   どのサービスにも通じる語彙だけを持ち、生成先や歌詞の表記といった呼び出し側の方針は、
   `Recipe` を埋め込んだ呼び出し側の型に置きます。
 * **`lyria`**: 歌詞生成 → 作曲レシピ生成 → Lyria 音声生成の 3 段。
-  * **プロンプト本文を一切持ちません。** 作詞・作曲は `TextPromptBuilder` を注入して決め、
+  * **プロンプト本文を一切持ちません。** 作詞・作曲は `TextPromptBuilder` を注入して決め
+    （呼び出し側が自分で組み立てて `GenerateLyricsFromPrompt` / `ComposeFromPrompt` へ渡すこともできます）、
     音声は呼び出し側が組み立てたプロンプトを `GenerateAudio(ctx, lyria.AudioRequest{...})` で
     受け取ります。このパッケージでは **`Generator` が AI を呼ぶ側、`Builder` が呼ばない
     組み立て役**を指します。
