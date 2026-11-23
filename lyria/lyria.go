@@ -30,10 +30,17 @@ type Workflow struct {
 	lyrics   LyricsGenerator
 	composer Composer
 	audio    AudioGenerator
+	// text serves the FromPrompt entry points. It is the same generator as lyrics and composer,
+	// so both paths share one rate guard and one singleflight group.
+	text *textGenerator
 }
 
 // New creates a Workflow, injecting the AI client and the implementation of the lyrics and composition prompts.
 // The prompt for audio generation is assembled by the caller and passed to GenerateAudio (AudioRequest).
+//
+// textPrompts may be nil for a caller that assembles the lyrics and composition prompts itself
+// (GenerateLyricsFromPrompt / ComposeFromPrompt). GenerateLyrics and Compose then return
+// ErrWorkflowConfig.
 //
 // Always specify the model names with WithGeminiModel / WithLyriaModel.
 // There are no defaults because the choice of model directly determines quality and cost.
@@ -41,9 +48,6 @@ func New(aiClient gemini.Generator, textPrompts TextPromptBuilder, overrides ...
 	opts := applyOptions(overrides...)
 	if aiClient == nil {
 		return nil, fmt.Errorf("%w: aiClient is required", ErrWorkflowConfig)
-	}
-	if textPrompts == nil {
-		return nil, fmt.Errorf("%w: textPrompts is required", ErrWorkflowConfig)
 	}
 	if opts.geminiModel == "" {
 		return nil, fmt.Errorf("%w: GeminiModel is required but not set", ErrWorkflowConfig)
@@ -79,6 +83,7 @@ func New(aiClient gemini.Generator, textPrompts TextPromptBuilder, overrides ...
 	return &Workflow{
 		lyrics:   textGen,
 		composer: textGen,
+		text:     textGen,
 		audio: &audioGenerator{
 			aiClient:          audioClient,
 			guard:             audioGuard,
@@ -95,6 +100,18 @@ func (w *Workflow) GenerateLyrics(ctx context.Context, ai AIModels, input *Colle
 // Compose generates a song recipe from a lyrics draft.
 func (w *Workflow) Compose(ctx context.Context, ai AIModels, lyrics *LyricsDraft) (*MusicRecipe, error) {
 	return w.composer.Compose(ctx, ai, lyrics)
+}
+
+// GenerateLyricsFromPrompt generates a lyrics draft from a prompt the caller assembled.
+// ai supplies the model and the seed.
+func (w *Workflow) GenerateLyricsFromPrompt(ctx context.Context, ai AIModels, prompt string) (*LyricsDraft, error) {
+	return w.text.GenerateLyricsFromPrompt(ctx, ai, prompt)
+}
+
+// ComposeFromPrompt generates a song recipe from a prompt the caller assembled, and attaches
+// lyrics and ai to it as Compose does.
+func (w *Workflow) ComposeFromPrompt(ctx context.Context, ai AIModels, prompt string, lyrics *LyricsDraft) (*MusicRecipe, error) {
+	return w.text.ComposeFromPrompt(ctx, ai, prompt, lyrics)
 }
 
 // GenerateAudio generates the audio for the whole song from an assembled prompt.

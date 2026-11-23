@@ -66,7 +66,8 @@ not notice from reading the godoc.
 * **`lyria`**: three stages — lyrics generation → composition recipe generation → Lyria audio
   generation.
   * **It holds no prompt text at all.** Lyrics and composition are decided by an injected
-    `TextPromptBuilder`, and for audio it receives a prompt assembled by the caller via
+    `TextPromptBuilder` (or the caller assembles the prompt itself and calls
+    `GenerateLyricsFromPrompt` / `ComposeFromPrompt`), and for audio it receives a prompt assembled by the caller via
     `GenerateAudio(ctx, lyria.AudioRequest{...})`. In this package, **a `Generator` is something that
     calls the AI, and a `Builder` is an assembler that does not**.
   * **There is deliberately no one-shot entry point.** The three stages are called separately so that
